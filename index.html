@@ -70,13 +70,10 @@ input[type=file]{display:none}
   min-height:0;
   background:var(--paper);
 }
-/* El viewport tiene el tamaño exacto de la "página" visible */
 .book-viewport{
   position:absolute; inset:0;
   overflow:hidden;
 }
-/* Aquí vive TODO el contenido del capítulo, en columnas anchas.
-   Se desplaza horizontalmente con transform. */
 .book-content{
   height:100%;
   column-fill: auto;
@@ -225,8 +222,7 @@ let currentPage=0;
 let totalPages=1;
 let pageRestoreTarget=0;
 let pendingGoLastPage=false;
-let currentPageWidth=0;   // ancho de UNA columna (incluye gap)
-let currentColumnWidth=0; // ancho de la columna sin gap
+let currentColumnWidth=0;
 
 const $=s=>document.querySelector(s);
 const readerWrap=$('#readerWrap'), emptyEl=$('#emptyState'), tocEl=$('#toc'),
@@ -373,7 +369,6 @@ async function syncCurrentBookFromCloud(){
   if(syncSession!==bookSessionId) return;
 
   if(remote){
-    // Los subrayados remotos SIEMPRE ganan (es lo que queremos sincronizar).
     const remoteHighlights=Array.isArray(remote.highlights)?remote.highlights:[];
     highlights=remoteHighlights;
     saveJSON('epubHl_'+bookId, highlights);
@@ -389,7 +384,6 @@ async function syncCurrentBookFromCloud(){
       pageRestoreTarget = remotePage;
       await renderChapter(remoteIndex);
     }else{
-      // Ya está navegando; solo refresca subrayados en el capítulo actual.
       renderHlist();
       applyHighlights();
     }
@@ -781,7 +775,8 @@ function finishChapterTiming(){
 
 function applyPageTransform(){
   if(!currentColumnWidth) return;
-  const step=currentColumnWidth+60; // ancho columna + gap
+  const gap=60;
+  const step=currentColumnWidth + gap;
   bookContent.style.transform='translateX(-'+(currentPage*step)+'px)';
 }
 function updatePageUI(){
@@ -841,15 +836,11 @@ async function renderChapter(index){
 
   if(thisRender!==renderSequence || renderBookId!==bookId) return;
 
-  // Resetea el contenido y el transform.
   bookContent.style.transform='translateX(0)';
   bookContent.innerHTML=body.innerHTML;
 
-  // Configura el ancho de columna para que sea exactamente el ancho visible.
-  // Así, cada "pantalla" del viewport = una columna del contenido.
   await layoutColumns();
 
-  // Aplica subrayados AHORA (con el layout ya definido).
   applyHighlights();
   renderHlist();
 
@@ -866,8 +857,6 @@ async function renderChapter(index){
   updateTimeEstimate();
   updatePageUI();
 
-  // Las imágenes que cargan después pueden cambiar la paginación. Recalculamos
-  // una vez al terminar de cargar todas.
   const imgs=[...bookContent.querySelectorAll('img')];
   if(imgs.length){
     let pending=imgs.length;
@@ -887,30 +876,33 @@ async function renderChapter(index){
 }
 
 // Coloca el contenido en columnas del ancho del viewport.
-// Esto es lo que hace que se vea "una página" a la vez.
+// Cada "pantalla" = una columna. El viewport recorta lo que sobra.
 async function layoutColumns(){
   await new Promise(r=>requestAnimationFrame(r));
   const vpWidth=bookViewport.clientWidth;
-  const padH=48; // padding vertical aplicado con book-content padding:48px 0
-  // Ancho disponible en la página (reservamos algo para márgenes visuales).
-  const sideMargin=Math.max(24, Math.min(80, vpWidth*0.06));
+  const gap=60;
+  const sideMargin=Math.max(24, Math.min(80, Math.round(vpWidth*0.06)));
   const contentWidth=vpWidth - sideMargin*2;
-  currentColumnWidth=contentWidth;
 
-  // El book-content ocupa todo el ancho del viewport, con padding lateral
-  // por dentro de cada columna.
-  bookContent.style.columnWidth=contentWidth+'px';
-  bookContent.style.columnGap='60px';
-  bookContent.style.width=vpWidth+'px';
-  bookContent.style.paddingLeft=sideMargin+'px';
-  bookContent.style.paddingRight='0px';
+  currentColumnWidth = contentWidth;
 
-  // Mide cuántas columnas hay.
+  // El book-content mide exactamente el viewport; las columnas se generan
+  // dentro con el ancho pedido. El padding lateral queda DENTRO de cada columna.
+  bookContent.style.width = vpWidth + 'px';
+  bookContent.style.columnWidth = contentWidth + 'px';
+  bookContent.style.columnGap = gap + 'px';
+  bookContent.style.paddingLeft = sideMargin + 'px';
+  bookContent.style.paddingRight = '0px';
+  bookContent.style.boxSizing = 'border-box';
+
   await new Promise(r=>requestAnimationFrame(r));
-  const totalW=bookContent.scrollWidth;
-  const step=contentWidth+60;
-  totalPages=Math.max(1, Math.round((totalW - sideMargin)/step));
-  // Si por redondeo queda 1 y hay contenido, al menos 1.
+
+  // scrollWidth incluye padding-left + N*(contentWidth) + N*gap + padding-right(0)
+  const usable = bookContent.scrollWidth - sideMargin;
+  totalPages = Math.max(1, Math.round(usable / (contentWidth + gap)));
+
+  // Ancho total del book-content = margen izq + N*(ancho col + gap).
+  bookContent.style.width = (sideMargin + totalPages*(contentWidth+gap)) + 'px';
 }
 
 function relayoutAfterImages(){
@@ -923,9 +915,6 @@ function relayoutAfterImages(){
 }
 
 // ---------- Subrayados ----------
-// Estrategia de robustez: guardamos offset Y texto. Al aplicar, si el offset no
-// da un rango válido (por diferencias de layout entre dispositivos), buscamos
-// el texto directamente. Así los subrayados SIEMPRE se sincronizan.
 function nodeOffset(container, node, offsetInNode){
   let charIndex=0;
   const w=document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
@@ -949,13 +938,12 @@ function rangeFromOffsets(container, start, end){
   const r=document.createRange(); r.setStart(startNode,startOffset); r.setEnd(endNode,endOffset); return r;
 }
 // Busca un texto concreto dentro del contenedor y devuelve el Range.
-// Necesario cuando los offsets no coinciden entre dispositivos.
+// Se usa como fallback cuando los offsets no coinciden entre dispositivos.
 function rangeFromText(container, searchText){
   if(!searchText) return null;
   const needle=searchText.replace(/\s+/g,' ').trim();
   if(needle.length<2) return null;
 
-  // Recolecta todos los nodos de texto y su texto concatenado.
   const walker=document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   const nodes=[]; const starts=[]; let acc='';
   let n;
@@ -963,16 +951,12 @@ function rangeFromText(container, searchText){
     nodes.push(n); starts.push(acc.length); acc+=n.nodeValue;
   }
   const haystack=acc.replace(/\s+/g,' ');
-  // Mapeo: por simplicidad buscamos el needle en el haystack normalizado,
-  // pero necesitamos volver a coordenadas del DOM original. Simplificamos
-  // usando una regex que tolere múltiples espacios en el DOM.
   const escaped=needle.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\s+/g,'\\s+');
   const re=new RegExp(escaped);
   const m=re.exec(haystack);
   if(!m) return null;
   const matchStart=m.index, matchEnd=m.index+m[0].length;
 
-  // Encuentra los nodos que contienen matchStart y matchEnd.
   let startNode=null, startOffset=0, endNode=null, endOffset=0;
   for(let i=0;i<nodes.length;i++){
     const s=starts[i]; const e=s+nodes[i].nodeValue.length;
@@ -996,10 +980,7 @@ function applyHighlights(){
   const chHref=spine[currentIndex];
   const hs=highlights.filter(h=>h.href===chHref).sort((a,b)=>a.start-b.start);
   hs.forEach(h=>{
-    // 1) Intenta por offsets.
     let r=rangeFromOffsets(bookContent, h.start, h.end);
-    // 2) Si el rango no tiene contenido o no coincide con el texto guardado,
-    //    busca por texto.
     const rText = r ? r.toString().replace(/\s+/g,' ').trim() : '';
     const expected = (h.text||'').replace(/\s+/g,' ').trim();
     if(!r || (expected && rText && !rText.startsWith(expected.slice(0, Math.min(20, expected.length))))){
@@ -1062,7 +1043,7 @@ function createHighlight(color, comment){
     href:spine[currentIndex],
     start:pendingRange.start,
     end:pendingRange.end,
-    text:pendingRange.text,   // <- guardamos el texto para fallback entre dispositivos
+    text:pendingRange.text,
     color,
     comment
   };
@@ -1181,7 +1162,7 @@ function goToLibrary(){
   finishChapterTiming();
   pushBookState();
   spine=[]; zip=null; bookId=''; highlights=[]; wordCounts=[]; totalBookWords=0;
-  pageRestoreTarget=0; currentPage=0; totalPages=1;
+  pageRestoreTarget=0; currentPage=0; totalPages=1; currentColumnWidth=0;
   bookViewport.style.display='none';
   bookContent.innerHTML='';
   navFoot.style.display='none';
