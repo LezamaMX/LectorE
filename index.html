@@ -206,7 +206,7 @@ let authReadyResolve; const authReadyPromise=new Promise(r=>authReadyResolve=r);
       $('#syncBadge').textContent = cloudReady ? 'Sincronizado en la nube ☁ ('+user.displayName+')' : '';
       $('#signInBtn').textContent = cloudReady ? 'Cerrar sesión' : 'Iniciar sesión con Google';
       if(cloudReady){
-        try{ const snap=await fbDb.doc('users/'+cloudUid+'/stats').get(); if(snap.exists) saveJSON('epubStats', snap.data()); }catch(e){}
+        try{ const snap=await fbDb.doc('users/'+cloudUid).get(); if(snap.exists && snap.data().stats) saveJSON('epubStats', snap.data().stats); }catch(e){}
         if(bookId && !first) await cloudBookSync();
       }
       if(first){ first=false; authReadyResolve(); }
@@ -218,14 +218,14 @@ $('#signInBtn').onclick=()=>{
   if(cloudReady){ fbAuth.signOut(); return; }
   fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e=>alert('No se pudo iniciar sesión: '+e.message));
 };
-function pushStats(){ if(!cloudReady) return; fbDb.doc('users/'+cloudUid+'/stats').set(getStats()).catch(()=>{}); }
+function pushStats(){ if(!cloudReady) return; try{ fbDb.doc('users/'+cloudUid).set({stats:getStats()}, {merge:true}).catch(()=>{}); }catch(e){} }
 function pushBookState(){
   if(!cloudReady || !bookId) return;
-  fbDb.doc('users/'+cloudUid+'/book_'+bookId).set({ currentIndex, highlights, updatedAt: Date.now() }).catch(()=>{});
+  try{ fbDb.doc('users/'+cloudUid+'/books/'+bookId).set({ currentIndex, highlights, updatedAt: Date.now() }).catch(()=>{}); }catch(e){}
 }
 async function pullBookState(){
   if(!cloudReady || !bookId) return null;
-  try{ const snap=await fbDb.doc('users/'+cloudUid+'/book_'+bookId).get(); return snap.exists?snap.data():null; }catch(e){ return null; }
+  try{ const snap=await fbDb.doc('users/'+cloudUid+'/books/'+bookId).get(); return snap.exists?snap.data():null; }catch(e){ return null; }
 }
 async function cloudBookSync(){
   const remote=await pullBookState();
@@ -285,7 +285,7 @@ async function loadEpub(arrayBuffer){
   const title=opfDoc.querySelector('metadata > title')?.textContent||'Libro sin título';
   const author=opfDoc.querySelector('metadata > creator')?.textContent||'';
   $('#bookTitle').textContent=title; $('#bookAuthor').textContent=author;
-  bookId=btoa(unescape(encodeURIComponent(title+'::'+author))).slice(0,40);
+  bookId=btoa(unescape(encodeURIComponent(title+'::'+author))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'').slice(0,40);
 
   const manifest={};
   opfDoc.querySelectorAll('manifest > item').forEach(item=>{
