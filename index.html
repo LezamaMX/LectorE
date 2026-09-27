@@ -17,7 +17,6 @@
   --paper:#FAF7F0; --ink:#221F1A; --ink-soft:#5B564C;
   --accent:#2F4B3C; --line:#DCD5C4; --panel:#F1ECDF;
   --serif:'Source Serif 4', Georgia, serif; --sans:'Work Sans', system-ui, sans-serif;
-  --h1:#F6C94C; --h2:#8FD19E; --h3:#8FB6D9; --h4:#E5A0C0;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
@@ -76,8 +75,22 @@ mark.h-pink{background:#F0C3DA; color:inherit}
 :root[data-theme="dark"] mark{color:#1B1A16}
 mark{border-radius:2px; cursor:pointer; padding:0 1px}
 mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
-.empty{flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:14px; color:var(--ink-soft); text-align:center; padding:24px;}
+.empty{flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:14px; color:var(--ink-soft); text-align:center; padding:24px; overflow-y:auto;}
 .empty .big{font-family:var(--serif); font-size:22px; color:var(--ink)}
+.library{width:100%; max-width:760px; display:flex; flex-direction:column; gap:10px; padding:8px 0 24px;}
+.lib-card{display:flex; gap:12px; padding:12px 14px; border-radius:10px; background:var(--panel); border:1px solid var(--line); cursor:pointer; text-align:left; align-items:center;}
+.lib-card:hover{border-color:var(--accent)}
+.lib-card .cover{width:48px; height:64px; flex-shrink:0; border-radius:6px; background:linear-gradient(160deg, var(--accent), var(--ink-soft)); display:flex; align-items:center; justify-content:center; color:var(--paper); font-family:var(--serif); font-size:22px; font-weight:600;}
+.lib-card .info{flex:1; min-width:0;}
+.lib-card .info h3{margin:0 0 3px; font-family:var(--serif); font-size:16px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.lib-card .info p{margin:0; font-size:12.5px; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.lib-card .info .prog{margin-top:6px; font-size:11.5px; color:var(--ink-soft);}
+.lib-card .del{background:none; border:none; color:var(--ink-soft); font-size:18px; cursor:pointer; padding:4px 8px;}
+.lib-card .del:hover{color:#c0392b}
+.lib-actions{display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top:6px;}
+.lib-actions button, .lib-actions label{background:var(--accent); color:var(--paper); border:none; padding:10px 18px; border-radius:8px; font-family:var(--sans); font-size:13px; font-weight:500; cursor:pointer;}
+.lib-actions label.secondary{background:var(--panel); color:var(--ink); border:1px solid var(--line);}
+.lib-empty{font-size:13px; color:var(--ink-soft); padding:20px; border:1px dashed var(--line); border-radius:10px; width:100%; max-width:760px;}
 .nav-foot{display:flex; flex-direction:column; gap:4px; padding:8px 16px; padding-bottom:calc(8px + env(safe-area-inset-bottom,0px)); border-top:1px solid var(--line); background:var(--paper);}
 .nav-foot .row{display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--ink-soft);}
 .nav-foot button{background:none; border:1px solid var(--line); color:var(--ink); padding:7px 14px; border-radius:7px; cursor:pointer; font-family:var(--sans); font-size:13px;}
@@ -86,6 +99,12 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
 #selToolbar.show{display:flex}
 #selToolbar button{width:22px; height:22px; border-radius:50%; border:2px solid var(--paper); cursor:pointer; padding:0}
 #selToolbar .cmtbtn{width:auto; height:22px; border-radius:11px; border:none; background:var(--paper); color:var(--ink); font-size:11px; padding:0 8px; font-family:var(--sans)}
+#loading{position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:center; justify-content:center; color:#fff; font-family:var(--sans); font-size:14px; z-index:50; flex-direction:column; gap:12px; text-align:center; padding:20px;}
+#loading.show{display:flex}
+#loading .spinner{width:34px; height:34px; border:3px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%; animation:spin .8s linear infinite;}
+#loading .progbar{width:220px; height:6px; background:rgba(255,255,255,.2); border-radius:3px; overflow:hidden;}
+#loading .progbar i{display:block; height:100%; width:0; background:#fff; transition:width .2s;}
+@keyframes spin{to{transform:rotate(360deg)}}
 @media (max-width:720px){
   .side{position:fixed; z-index:5; height:100%; transform:translateX(-100%); transition:transform .2s}
   .side.open{transform:translateX(0)}
@@ -119,7 +138,8 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
   <div class="main">
     <div class="topbar">
       <button class="icon" id="menuBtn" title="Índice">☰</button>
-      <label class="upload">Abrir EPUB<input type="file" id="file" accept=".epub"></label>
+      <button class="icon" id="libBtn" title="Biblioteca" style="display:none">⌂</button>
+      <label class="upload" id="uploadLbl">Abrir EPUB<input type="file" id="file" accept=".epub"></label>
       <div class="title" id="chapterTitle"></div>
       <div class="ctrl">
         <button class="icon" id="fontDown" title="Reducir letra">A−</button>
@@ -131,8 +151,13 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
     <div class="bookbar"><i id="bookProgress"></i></div>
     <div class="reader-wrap" id="readerWrap">
       <div class="empty" id="emptyState">
-        <div class="big">Elige un archivo .epub para empezar a leer</div>
-        <p>Todo el procesamiento ocurre en tu navegador; el archivo no se sube a ningún servidor. Tus subrayados y tu progreso se guardan en este navegador.</p>
+        <div class="big" id="emptyBig">Tu biblioteca</div>
+        <p id="emptyMsg">Inicia sesión con Google para guardar tus libros en la nube y retomarlos desde cualquier dispositivo.</p>
+        <div class="library" id="libraryList"></div>
+        <div class="lib-actions" id="libActions">
+          <button id="signInLibBtn">Iniciar sesión con Google</button>
+          <label class="upload secondary">Añadir EPUB local<input type="file" id="fileLib" accept=".epub"></label>
+        </div>
       </div>
       <div class="reader" id="reader" style="display:none"></div>
     </div>
@@ -149,6 +174,11 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
   <button style="background:#F0C3DA" data-c="pink"></button>
   <button class="cmtbtn" id="cmtBtn">+ nota</button>
 </div>
+<div id="loading">
+  <div class="spinner"></div>
+  <div id="loadingText">Cargando…</div>
+  <div class="progbar" id="loadingBar" style="display:none"><i id="loadingBarFill"></i></div>
+</div>
 
 <script>
 const themes=['light','dark','sepia']; let themeIdx=0;
@@ -161,14 +191,15 @@ const $=s=>document.querySelector(s);
 const readerEl=$('#reader'), readerWrap=$('#readerWrap'), emptyEl=$('#emptyState'), tocEl=$('#toc'),
   hlistEl=$('#hlist'), chapterTitleEl=$('#chapterTitle'), navFoot=$('#navFoot'),
   prevBtn=$('#prevBtn'), nextBtn=$('#nextBtn'), progressEl=$('#progress'),
-  timeLeftEl=$('#timeLeft'), bookProgress=$('#bookProgress'), selToolbar=$('#selToolbar');
+  timeLeftEl=$('#timeLeft'), bookProgress=$('#bookProgress'), selToolbar=$('#selToolbar'),
+  libraryListEl=$('#libraryList'), libActionsEl=$('#libActions'), loadingEl=$('#loading'),
+  loadingTextEl=$('#loadingText'), loadingBar=$('#loadingBar'), loadingBarFill=$('#loadingBarFill');
 
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden){ activeMs += Date.now()-chapterStart; hidden=true; }
   else { chapterStart=Date.now(); hidden=false; }
 });
 
-// ---------- storage ----------
 function loadJSON(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } }
 function saveJSON(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 function getStats(){ return loadJSON('epubStats', {totalWords:0, totalMinutes:0}); }
@@ -178,10 +209,16 @@ function recordSession(words, minutes){
 }
 function avgWpm(){ const s=getStats(); return s.totalMinutes>0.3 ? Math.max(80, s.totalWords/s.totalMinutes) : 200; }
 
-// ---------- cloud sync (Firebase — tu propio proyecto gratuito, ver instrucciones al pie del archivo) ----------
-// 1) Crea un proyecto en https://console.firebase.google.com (gratis)
-// 2) Activa Firestore (modo producción) y en Authentication activa el método "Google"
-// 3) Pega aquí la config de tu proyecto (Configuración del proyecto > Tus apps > Web)
+function showLoading(text, showBar){
+  loadingTextEl.textContent = text || 'Cargando…';
+  loadingBar.style.display = showBar ? 'block' : 'none';
+  loadingBarFill.style.width = '0%';
+  loadingEl.classList.add('show');
+}
+function setLoadingProgress(pct){ loadingBarFill.style.width = Math.max(0,Math.min(100,pct))+'%'; }
+function hideLoading(){ loadingEl.classList.remove('show'); }
+
+// ---------- Firebase ----------
 const firebaseConfig = {
   apiKey: "AIzaSyAESUMrg4kBhqhKDgANTBrkfyZjaiYYsK8",
   authDomain: "ereader-69997.firebaseapp.com",
@@ -193,17 +230,21 @@ const firebaseConfig = {
 let fbAuth=null, fbDb=null, cloudUid=null, cloudReady=false, firebaseConfigured=false;
 let authReadyResolve; const authReadyPromise=new Promise(r=>authReadyResolve=r);
 
-// Evita que respuestas tardías de Firebase reemplacen un libro o una navegación
-// que el usuario ya cambió.
 let bookSessionId=0;
 let cloudSyncInFlight=0;
 let renderSequence=0;
+
+// Tamaño de cada chunk en bytes ANTES de pasar a base64.
+// Firestore tiene límite de 1 MB por documento; base64 infla ~33%, así que
+// dejamos margen: 600 KB de datos → ~800 KB en base64. Cabe con holgura.
+const CHUNK_SIZE = 600 * 1024;
 
 (function initFirebase(){
   if(!firebaseConfig.apiKey || firebaseConfig.apiKey.indexOf('TU_')===0){ authReadyResolve(); return; }
   try{
     firebase.initializeApp(firebaseConfig);
-    fbAuth=firebase.auth(); fbDb=firebase.firestore();
+    fbAuth=firebase.auth();
+    fbDb=firebase.firestore();
     firebaseConfigured=true;
     $('#signInBtn').style.display='inline-block';
     let first=true;
@@ -219,12 +260,7 @@ let renderSequence=0;
         ? 'Cerrar sesión'
         : 'Iniciar sesión con Google';
 
-      // La primera resolución de auth sólo desbloquea información de usuario.
-      // El EPUB NO espera a Firebase para empezar a renderizarse.
-      if(first){
-        first=false;
-        authReadyResolve();
-      }
+      if(first){ first=false; authReadyResolve(); }
 
       if(cloudReady){
         try{
@@ -232,15 +268,12 @@ let renderSequence=0;
           if(snap.exists && snap.data().stats){
             saveJSON('epubStats', snap.data().stats);
           }
-        }catch(e){
-          console.error('FIREBASE stats read ERROR:', e);
-        }
+        }catch(e){ console.error('FIREBASE stats read ERROR:', e); }
 
-        // Si ya había un libro abierto, sincronizamos en segundo plano.
-        // Nunca se llama a renderChapter desde aquí directamente.
-        if(bookId) syncCurrentBookFromCloud().catch(e=>{
-          console.error('FIREBASE book sync ERROR:', e);
-        });
+        if(bookId) syncCurrentBookFromCloud().catch(e=>console.error('FIREBASE book sync ERROR:', e));
+        if(readerEl.style.display==='none') loadLibrary();
+      }else{
+        if(readerEl.style.display==='none') loadLibrary();
       }
     });
   }catch(e){
@@ -248,8 +281,9 @@ let renderSequence=0;
     authReadyResolve();
   }
 })();
-$('#signInBtn').onclick=()=>{
-  if(!firebaseConfigured) return;
+
+function handleSignIn(){
+  if(!firebaseConfigured){ alert('Firebase no está configurado.'); return; }
   if(cloudReady){ fbAuth.signOut(); return; }
   fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e=>{
     console.error('FIREBASE signIn ERROR:', e);
@@ -257,69 +291,47 @@ $('#signInBtn').onclick=()=>{
       alert('No se pudo iniciar sesión: '+(e.message||e.code||e));
     }
   });
-};
+}
+$('#signInBtn').onclick=handleSignIn;
+$('#signInLibBtn').onclick=handleSignIn;
+
 function pushStats(){ if(!cloudReady) return; try{ fbDb.doc('users/'+cloudUid).set({stats:getStats()}, {merge:true}).catch(()=>{}); }catch(e){} }
+
 function pushBookState(){
   if(!cloudReady || !bookId) return;
-
-  const syncBookId=bookId;
-  const syncUid=cloudUid;
-  const data={
-    currentIndex,
-    highlights,
-    updatedAt: Date.now()
-  };
-
+  const syncBookId=bookId, syncUid=cloudUid;
+  const data={ currentIndex, highlights, updatedAt: Date.now() };
   try{
     fbDb.doc('users/'+syncUid+'/books/'+syncBookId)
       .set(data, {merge:true})
       .catch(e=>console.error('FIREBASE pushBookState ERROR:', e));
-  }catch(e){
-    console.error('FIREBASE pushBookState ERROR:', e);
-  }
+  }catch(e){ console.error('FIREBASE pushBookState ERROR:', e); }
 }
 
 async function pullBookState(bookIdOverride=bookId, uidOverride=cloudUid){
   if(!cloudReady || !bookIdOverride || !uidOverride) return null;
-
   try{
     const snap=await fbDb.doc('users/'+uidOverride+'/books/'+bookIdOverride).get();
     return snap.exists?snap.data():null;
-  }catch(e){
-    console.error('FIREBASE pullBookState ERROR:', e);
-    return null;
-  }
+  }catch(e){ console.error('FIREBASE pullBookState ERROR:', e); return null; }
 }
 
-// Firebase sincroniza DESPUÉS de que el EPUB ya está visible.
-// Si el usuario cambia de libro o capítulo mientras esperamos la red,
-// la respuesta atrasada no debe destruir su estado actual.
 async function syncCurrentBookFromCloud(){
   if(!cloudReady || !bookId || !spine.length) return;
-
   const syncId=++cloudSyncInFlight;
-  const syncBookId=bookId;
-  const syncUid=cloudUid;
-  const syncSession=bookSessionId;
-  const syncIndex=currentIndex;
+  const syncBookId=bookId, syncUid=cloudUid;
+  const syncSession=bookSessionId, syncIndex=currentIndex;
 
   const remote=await pullBookState(syncBookId, syncUid);
-
   if(syncId!==cloudSyncInFlight) return;
   if(syncBookId!==bookId || syncUid!==cloudUid) return;
   if(syncSession!==bookSessionId) return;
 
   if(remote){
-    const remoteHighlights=Array.isArray(remote.highlights)
-      ? remote.highlights
-      : [];
-
+    const remoteHighlights=Array.isArray(remote.highlights)?remote.highlights:[];
     const remoteIndex=typeof remote.currentIndex==='number'
       ? Math.max(0, Math.min(remote.currentIndex, spine.length-1))
       : 0;
-
-    // Si el usuario ya navegó mientras Firebase respondía, respetamos
-    // su navegación y no la sustituimos por el índice remoto.
     const userNavigated=(currentIndex!==syncIndex);
 
     highlights=remoteHighlights;
@@ -333,8 +345,186 @@ async function syncCurrentBookFromCloud(){
       applyHighlights();
     }
   }else{
-    // No existe estado remoto: creamos uno sin bloquear la lectura.
     pushBookState();
+  }
+}
+
+// ---------- Subida/bajada del EPUB por chunks a Firestore ----------
+function arrayBufferToBase64(buf){
+  let binary='';
+  const bytes=new Uint8Array(buf);
+  const CHUNK=0x8000;
+  for(let i=0;i<bytes.length;i+=CHUNK){
+    binary+=String.fromCharCode.apply(null, bytes.subarray(i, i+CHUNK));
+  }
+  return btoa(binary);
+}
+function base64ToArrayBuffer(b64){
+  const binary=atob(b64);
+  const len=binary.length;
+  const bytes=new Uint8Array(len);
+  for(let i=0;i<len;i++) bytes[i]=binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+async function uploadBookToCloud(buf, meta){
+  if(!cloudReady || !fbDb) return;
+  // meta: { bookId, title, author, totalChapters }
+  const docRef=fbDb.doc('users/'+cloudUid+'/books/'+meta.bookId);
+  const existing=await docRef.get();
+  if(existing.exists && existing.data().chunks){
+    // Ya está en la nube: solo aseguramos metadatos actualizados.
+    await docRef.set({
+      title: meta.title, author: meta.author,
+      totalChapters: meta.totalChapters||0
+    }, {merge:true});
+    return;
+  }
+
+  const totalChunks=Math.ceil(buf.byteLength / CHUNK_SIZE);
+  showLoading('Subiendo a la nube… 0 / '+totalChunks, true);
+
+  // 1) Crear el documento raíz con metadatos y número de chunks.
+  await docRef.set({
+    bookId: meta.bookId,
+    title: meta.title,
+    author: meta.author,
+    totalChapters: meta.totalChapters||0,
+    chunks: totalChunks,
+    size: buf.byteLength,
+    addedAt: Date.now(),
+    currentIndex: 0,
+    highlights: []
+  }, {merge:true});
+
+  // 2) Subir cada trozo por separado (por si falla uno, no se pierde todo).
+  const chunksCol=docRef.collection('chunks');
+  for(let i=0;i<totalChunks;i++){
+    const slice=buf.slice(i*CHUNK_SIZE, Math.min((i+1)*CHUNK_SIZE, buf.byteLength));
+    const b64=arrayBufferToBase64(slice);
+    await chunksCol.doc(String(i)).set({ data: b64 });
+    setLoadingProgress(Math.round((i+1)/totalChunks*100));
+    loadingTextEl.textContent='Subiendo a la nube… '+(i+1)+' / '+totalChunks;
+  }
+
+  hideLoading();
+}
+
+async function downloadBookFromCloud(bookIdToLoad){
+  if(!cloudReady) throw new Error('No hay sesión en la nube.');
+  const docRef=fbDb.doc('users/'+cloudUid+'/books/'+bookIdToLoad);
+  const snap=await docRef.get();
+  if(!snap.exists) throw new Error('Libro no encontrado en la nube.');
+  const meta=snap.data();
+  const totalChunks=meta.chunks||0;
+  if(!totalChunks) throw new Error('Este libro no tiene archivo guardado en la nube.');
+
+  const chunksCol=docRef.collection('chunks');
+  // Los chunks se leen en orden secuencial para no saturar memoria ni red.
+  const parts=[];
+  for(let i=0;i<totalChunks;i++){
+    const cs=await chunksCol.doc(String(i)).get();
+    if(!cs.exists) throw new Error('Falta el fragmento '+i+' del libro.');
+    parts.push(base64ToArrayBuffer(cs.data().data));
+    setLoadingProgress(Math.round((i+1)/totalChunks*100));
+    loadingTextEl.textContent='Descargando libro… '+(i+1)+' / '+totalChunks;
+  }
+  // Concatenar todos los ArrayBuffers.
+  let total=0; parts.forEach(p=>total+=p.byteLength);
+  const out=new Uint8Array(total);
+  let off=0; parts.forEach(p=>{ out.set(new Uint8Array(p), off); off+=p.byteLength; });
+  return { buf: out.buffer, meta };
+}
+
+// ---------- Biblioteca ----------
+async function loadLibrary(){
+  if(!firebaseConfigured){
+    renderLibraryError('Firebase no está configurado. Puedes leer EPUBs locales, pero no se guardarán en la nube.');
+    return;
+  }
+  if(!cloudReady){
+    renderLibraryError('Inicia sesión con Google para ver tu biblioteca en la nube.');
+    return;
+  }
+  libraryListEl.innerHTML='<div class="lib-empty">Cargando biblioteca…</div>';
+  try{
+    const snap=await fbDb.collection('users/'+cloudUid+'/books')
+      .orderBy('addedAt','desc').get();
+    const list=snap.docs.map(d=>({id:d.id, ...d.data()}));
+    renderLibrary(list);
+  }catch(e){
+    console.error('loadLibrary ERROR:', e);
+    renderLibraryError('No se pudo cargar la biblioteca: '+(e.message||e));
+  }
+}
+
+function renderLibraryError(msg){
+  libraryListEl.innerHTML='<div class="lib-empty">'+escapeHtml(msg)+'</div>';
+  libActionsEl.style.display='flex';
+  $('#signInLibBtn').style.display = cloudReady ? 'none' : 'inline-block';
+}
+
+function renderLibrary(list){
+  libActionsEl.style.display='flex';
+  $('#signInLibBtn').style.display='none';
+
+  if(!list.length){
+    libraryListEl.innerHTML='<div class="lib-empty">Aún no tienes libros en la nube. Añade un EPUB para empezar.</div>';
+    return;
+  }
+  libraryListEl.innerHTML='';
+  list.forEach(b=>{
+    const card=document.createElement('div');
+    card.className='lib-card';
+    const initial=(b.title||'?').trim().charAt(0).toUpperCase();
+    const total=b.totalChapters||0;
+    const idx=typeof b.currentIndex==='number'?b.currentIndex:0;
+    const pct = total>0 ? Math.round((idx+1)/total*100) : 0;
+    card.innerHTML=
+      '<div class="cover">'+escapeHtml(initial)+'</div>'+
+      '<div class="info">'+
+        '<h3>'+escapeHtml(b.title||'Sin título')+'</h3>'+
+        '<p>'+escapeHtml(b.author||'')+'</p>'+
+        '<div class="prog">'+(total?('Capítulo '+(idx+1)+' de '+total+' · '+pct+'%'):'')+'</div>'+
+      '</div>'+
+      '<button class="del" title="Eliminar de la nube">✕</button>';
+    const openFn=()=>openCloudBook(b);
+    card.querySelector('.info').onclick=openFn;
+    card.querySelector('.cover').onclick=openFn;
+    card.querySelector('.del').onclick=async ev=>{
+      ev.stopPropagation();
+      if(!confirm('¿Eliminar "'+(b.title||'este libro')+'" de tu biblioteca en la nube?')) return;
+      try{
+        // Borrar chunks y luego el doc raíz.
+        const chunksCol=fbDb.collection('users/'+cloudUid+'/books/'+b.id+'/chunks');
+        const cs=await chunksCol.get();
+        const batch=fbDb.batch();
+        cs.docs.forEach(d=>batch.delete(d.ref));
+        batch.delete(fbDb.doc('users/'+cloudUid+'/books/'+b.id));
+        await batch.commit();
+        try{ localStorage.removeItem('epubHl_'+b.id); localStorage.removeItem('epubProg_'+b.id); }catch(e){}
+        loadLibrary();
+      }catch(e){
+        alert('No se pudo eliminar: '+(e.message||e));
+      }
+    };
+    libraryListEl.appendChild(card);
+  });
+}
+
+async function openCloudBook(meta){
+  showLoading('Descargando "'+(meta.title||'libro')+'"…', true);
+  try{
+    const { buf, meta: fullMeta }=await downloadBookFromCloud(meta.id);
+    // Cachea los subrayados y la posición remotos antes de abrir.
+    if(Array.isArray(fullMeta.highlights)) saveJSON('epubHl_'+meta.id, fullMeta.highlights);
+    if(typeof fullMeta.currentIndex==='number') saveJSON('epubProg_'+meta.id, {index: fullMeta.currentIndex});
+    hideLoading();
+    await loadEpub(buf);
+  }catch(e){
+    hideLoading();
+    console.error('openCloudBook ERROR:', e);
+    alert('No se pudo abrir el libro: '+(e.message||e));
   }
 }
 
@@ -376,90 +566,99 @@ function plainText(html){
 function wordCount(txt){ return txt ? txt.split(' ').filter(Boolean).length : 0; }
 
 async function loadEpub(arrayBuffer){
-  zip=await JSZip.loadAsync(arrayBuffer);
-  const containerXml=await zip.file('META-INF/container.xml').async('string');
-  const containerDoc=new DOMParser().parseFromString(containerXml,'application/xml');
-  const opfPath=containerDoc.querySelector('rootfile').getAttribute('full-path');
-  opfDir=opfPath.includes('/')?opfPath.slice(0,opfPath.lastIndexOf('/')+1):'';
-  const opfXml=await zip.file(opfPath).async('string');
-  const opfDoc=new DOMParser().parseFromString(opfXml,'application/xml');
-  const title=opfDoc.querySelector('metadata > title')?.textContent||'Libro sin título';
-  const author=opfDoc.querySelector('metadata > creator')?.textContent||'';
-  $('#bookTitle').textContent=title; $('#bookAuthor').textContent=author;
-  bookId=btoa(unescape(encodeURIComponent(title+'::'+author))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'').slice(0,40);
-
-  const manifest={};
-  opfDoc.querySelectorAll('manifest > item').forEach(item=>{
-    manifest[item.getAttribute('id')]={href:opfDir+item.getAttribute('href'), mediaType:item.getAttribute('media-type')};
-  });
-  spine=[];
-  opfDoc.querySelectorAll('spine > itemref').forEach(ref=>{
-    const idref=ref.getAttribute('idref'); if(manifest[idref]) spine.push(manifest[idref].href);
-  });
-
-  tocItems=[];
-  const navItem=Object.values(manifest).find(m=>m.mediaType==='application/xhtml+xml'&&m.href.match(/nav\.xhtml$/i));
-  const ncxItem=Object.values(manifest).find(m=>m.mediaType==='application/x-dtbncx+xml');
+  showLoading('Abriendo EPUB…', false);
   try{
-    if(navItem){
-      const navXml=await zip.file(navItem.href).async('string');
-      const navDoc=new DOMParser().parseFromString(navXml,'text/html');
-      navDoc.querySelectorAll('nav a').forEach(a=>{
-        tocItems.push({label:a.textContent.trim()||'—', href:resolvePath(navItem.href, a.getAttribute('href')||'')});
-      });
-    } else if(ncxItem){
-      const ncxXml=await zip.file(ncxItem.href).async('string');
-      const ncxDoc=new DOMParser().parseFromString(ncxXml,'application/xml');
-      ncxDoc.querySelectorAll('navPoint').forEach(np=>{
-        const label=np.querySelector('navLabel > text')?.textContent.trim()||'—';
-        const src=np.querySelector('content')?.getAttribute('src')||'';
-        tocItems.push({label, href:resolvePath(ncxItem.href, src)});
-      });
-    }
-  }catch(e){ tocItems=[]; }
-  if(tocItems.length===0) tocItems=spine.map((h,i)=>({label:'Capítulo '+(i+1), href:h}));
+    zip=await JSZip.loadAsync(arrayBuffer);
+    const containerXml=await zip.file('META-INF/container.xml').async('string');
+    const containerDoc=new DOMParser().parseFromString(containerXml,'application/xml');
+    const opfPath=containerDoc.querySelector('rootfile').getAttribute('full-path');
+    opfDir=opfPath.includes('/')?opfPath.slice(0,opfPath.lastIndexOf('/')+1):'';
+    const opfXml=await zip.file(opfPath).async('string');
+    const opfDoc=new DOMParser().parseFromString(opfXml,'application/xml');
+    const title=opfDoc.querySelector('metadata > title')?.textContent||'Libro sin título';
+    const author=opfDoc.querySelector('metadata > creator')?.textContent||'';
+    $('#bookTitle').textContent=title; $('#bookAuthor').textContent=author;
+    bookId=btoa(unescape(encodeURIComponent(title+'::'+author))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'').slice(0,40);
 
-  buildTocUI();
+    const manifest={};
+    opfDoc.querySelectorAll('manifest > item').forEach(item=>{
+      manifest[item.getAttribute('id')]={href:opfDir+item.getAttribute('href'), mediaType:item.getAttribute('media-type')};
+    });
+    spine=[];
+    opfDoc.querySelectorAll('spine > itemref').forEach(ref=>{
+      const idref=ref.getAttribute('idref'); if(manifest[idref]) spine.push(manifest[idref].href);
+    });
 
-  // Cada apertura de EPUB crea una nueva sesión. Esto permite ignorar
-  // respuestas tardías de Firebase pertenecientes al libro anterior.
-  const thisSession=++bookSessionId;
-
-  // PRIMERO: abrir el EPUB usando únicamente el archivo local.
-  // Firebase nunca debe impedir que el usuario empiece a leer.
-  highlights=loadJSON('epubHl_'+bookId, []);
-
-  const prog=loadJSON('epubProg_'+bookId, {index:0});
-
-  emptyEl.style.display='none';
-  readerEl.style.display='block';
-  navFoot.style.display='flex';
-
-  applyFont();
-
-  await renderChapter(prog.index||0);
-  computeWordCounts();
-
-  // SEGUNDO: sincronizar con Firebase en segundo plano.
-  // Esperamos a que Auth termine sólo si todavía no sabemos si hay usuario.
-  if(cloudReady){
-    if(thisSession===bookSessionId){
-      syncCurrentBookFromCloud().catch(e=>{
-        console.error('FIREBASE background sync ERROR:', e);
-      });
-    }
-  }else if(firebaseConfigured){
-    authReadyPromise.then(()=>{
-      if(
-        cloudReady &&
-        thisSession===bookSessionId &&
-        bookId
-      ){
-        syncCurrentBookFromCloud().catch(e=>{
-          console.error('FIREBASE delayed sync ERROR:', e);
+    tocItems=[];
+    const navItem=Object.values(manifest).find(m=>m.mediaType==='application/xhtml+xml'&&m.href.match(/nav\.xhtml$/i));
+    const ncxItem=Object.values(manifest).find(m=>m.mediaType==='application/x-dtbncx+xml');
+    try{
+      if(navItem){
+        const navXml=await zip.file(navItem.href).async('string');
+        const navDoc=new DOMParser().parseFromString(navXml,'text/html');
+        navDoc.querySelectorAll('nav a').forEach(a=>{
+          tocItems.push({label:a.textContent.trim()||'—', href:resolvePath(navItem.href, a.getAttribute('href')||'')});
+        });
+      } else if(ncxItem){
+        const ncxXml=await zip.file(ncxItem.href).async('string');
+        const ncxDoc=new DOMParser().parseFromString(ncxXml,'application/xml');
+        ncxDoc.querySelectorAll('navPoint').forEach(np=>{
+          const label=np.querySelector('navLabel > text')?.textContent.trim()||'—';
+          const src=np.querySelector('content')?.getAttribute('src')||'';
+          tocItems.push({label, href:resolvePath(ncxItem.href, src)});
         });
       }
-    });
+    }catch(e){ tocItems=[]; }
+    if(tocItems.length===0) tocItems=spine.map((h,i)=>({label:'Capítulo '+(i+1), href:h}));
+
+    buildTocUI();
+
+    const thisSession=++bookSessionId;
+
+    highlights=loadJSON('epubHl_'+bookId, []);
+    const prog=loadJSON('epubProg_'+bookId, {index:0});
+
+    emptyEl.style.display='none';
+    readerEl.style.display='block';
+    navFoot.style.display='flex';
+    $('#libBtn').style.display='inline-block';
+
+    applyFont();
+
+    await renderChapter(prog.index||0);
+    hideLoading();
+    computeWordCounts();
+
+    // Subida automática a la nube si hay sesión y aún no está.
+    if(cloudReady){
+      uploadBookToCloud(arrayBuffer, {
+        bookId, title, author, totalChapters: spine.length
+      }).catch(e=>console.error('uploadBookToCloud ERROR:', e));
+    }else if(firebaseConfigured){
+      authReadyPromise.then(()=>{
+        if(cloudReady && bookId){
+          uploadBookToCloud(arrayBuffer, {
+            bookId, title, author, totalChapters: spine.length
+          }).catch(e=>console.error('uploadBookToCloud delayed ERROR:', e));
+        }
+      });
+    }
+
+    // Sincroniza estado (progreso + subrayados) con la nube en segundo plano.
+    if(cloudReady){
+      if(thisSession===bookSessionId){
+        syncCurrentBookFromCloud().catch(e=>console.error('FIREBASE background sync ERROR:', e));
+      }
+    }else if(firebaseConfigured){
+      authReadyPromise.then(()=>{
+        if(cloudReady && thisSession===bookSessionId && bookId){
+          syncCurrentBookFromCloud().catch(e=>console.error('FIREBASE delayed sync ERROR:', e));
+        }
+      });
+    }
+  }catch(err){
+    hideLoading();
+    throw err;
   }
 }
 
@@ -517,18 +716,13 @@ function finishChapterTiming(){
 
 async function renderChapter(index){
   if(index<0||index>=spine.length) return;
-
   const thisRender=++renderSequence;
-
   currentIndex=index;
   chapterStart=Date.now();
   activeMs=0;
-
   const renderBookId=bookId;
 
   saveJSON('epubProg_'+renderBookId, {index});
-
-  // La escritura a Firebase es asíncrona y no bloquea la renderización.
   pushBookState();
 
   const path=spine[index];
@@ -728,22 +922,41 @@ async function exportDocx(){
 $('#expPdf').onclick=exportPdf;
 $('#expDocx').onclick=exportDocx;
 
-$('#file').addEventListener('change', async (e)=>{
-  const f=e.target.files[0];
-  if(!f) return;
+// ---------- Eventos de archivo y biblioteca ----------
+function goToLibrary(){
+  finishChapterTiming();
+  spine=[]; zip=null; bookId=''; highlights=[]; wordCounts=[]; totalBookWords=0;
+  readerEl.style.display='none';
+  navFoot.style.display='none';
+  $('#libBtn').style.display='none';
+  $('#bookTitle').textContent='Sin libro cargado';
+  $('#bookAuthor').textContent='';
+  $('#chapterTitle').textContent='';
+  bookProgress.style.width='0%';
+  emptyEl.style.display='flex';
+  loadLibrary();
+}
+$('#libBtn').onclick=goToLibrary;
 
-  // Invalida cualquier render/sync pendiente del libro anterior.
+async function handleFile(f){
+  if(!f) return;
   bookSessionId++;
   renderSequence++;
-
   try{
     const buf=await f.arrayBuffer();
     await loadEpub(buf);
   }catch(err){
-    emptyEl.querySelector('.big').textContent='No se pudo leer este archivo. ¿Seguro que es un .epub válido?';
+    hideLoading();
+    $('#emptyBig').textContent='No se pudo leer este archivo';
+    $('#emptyMsg').textContent='¿Seguro que es un .epub válido?';
     console.error('EPUB load ERROR:', err);
   }
-});
+}
+$('#file').addEventListener('change', e=>handleFile(e.target.files[0]));
+$('#fileLib').addEventListener('change', e=>handleFile(e.target.files[0]));
+
+// Carga inicial: biblioteca.
+loadLibrary();
 </script>
 </body>
 </html>
