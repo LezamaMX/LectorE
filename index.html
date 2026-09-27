@@ -183,12 +183,12 @@ function avgWpm(){ const s=getStats(); return s.totalMinutes>0.3 ? Math.max(80, 
 // 2) Activa Firestore (modo producción) y en Authentication activa el método "Google"
 // 3) Pega aquí la config de tu proyecto (Configuración del proyecto > Tus apps > Web)
 const firebaseConfig = {
-  apiKey: "TU_API_KEY",
-  authDomain: "TU_PROYECTO.firebaseapp.com",
-  projectId: "TU_PROYECTO",
-  storageBucket: "TU_PROYECTO.appspot.com",
-  messagingSenderId: "TU_SENDER_ID",
-  appId: "TU_APP_ID"
+  apiKey: "AIzaSyAESUMrg4kBhqhKDgANTBrkfyZjaiYYsK8",
+  authDomain: "ereader-69997.firebaseapp.com",
+  projectId: "ereader-69997",
+  storageBucket: "ereader-69997.firebasestorage.app",
+  messagingSenderId: "596698647357",
+  appId: "1:596698647357:web:afaa6a8f0a31c12e6f9354"
 };
 let fbAuth=null, fbDb=null, cloudUid=null, cloudReady=false, firebaseConfigured=false;
 let authReadyResolve; const authReadyPromise=new Promise(r=>authReadyResolve=r);
