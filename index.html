@@ -28,7 +28,7 @@
 :root[data-theme="sepia"]{ --paper:#F1E7D0; --ink:#3B2E1E; --ink-soft:#79674C; --accent:#7A4B2A; --line:#DCC9A0; --panel:#E7D8B8; }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
-body{background:var(--paper); color:var(--ink); font-family:var(--sans); padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);}
+body{background:var(--paper); color:var(--ink); font-family:var(--sans); padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px); overflow:hidden;}
 .app{display:flex; height:100%; min-height:100vh}
 .side{width:260px; flex-shrink:0; background:var(--panel); border-right:1px solid var(--line); display:flex; flex-direction:column; overflow:hidden;}
 .side-head{padding:18px 16px 10px; border-bottom:1px solid var(--line)}
@@ -51,7 +51,7 @@ body{background:var(--paper); color:var(--ink); font-family:var(--sans); padding
 .hl-export button{flex:1; background:var(--panel); border:1px solid var(--line); color:var(--ink); font-family:var(--sans); font-size:12px; padding:8px 4px; border-radius:7px; cursor:pointer;}
 .hl-export button:hover{border-color:var(--accent)}
 #hlistItems{padding:8px 8px 8px}
-.main{flex:1; display:flex; flex-direction:column; min-width:0}
+.main{flex:1; display:flex; flex-direction:column; min-width:0; min-height:0;}
 .topbar{display:flex; align-items:center; gap:10px; padding:10px 16px; padding-top:calc(10px + env(safe-area-inset-top,0px)); border-bottom:1px solid var(--line); background:var(--paper); flex-wrap:wrap;}
 .topbar .title{font-size:13px; color:var(--ink-soft); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .ctrl{display:flex; align-items:center; gap:6px}
@@ -62,19 +62,50 @@ label.upload{background:var(--accent); color:var(--paper); border:none; padding:
 input[type=file]{display:none}
 .bookbar{height:3px; background:var(--line); position:relative}
 .bookbar i{position:absolute; left:0; top:0; height:100%; background:var(--accent); width:0%; transition:width .3s}
-.reader-wrap{flex:1; overflow-y:auto; position:relative}
-.reader-wrap.cols{overflow-x:auto; overflow-y:hidden}
-.reader{max-width:640px; margin:0 auto; padding:48px 24px 100px; font-family:var(--serif); line-height:1.65; font-size:var(--fs,19px);}
-.reader.cols{max-width:none; column-width:520px; column-gap:64px; padding:48px 32px; height:100%; box-sizing:border-box}
-.reader img{max-width:100%; height:auto}
-.reader h1,.reader h2,.reader h3{font-family:var(--serif); line-height:1.25}
-mark.h-yellow{background:#F6D888; color:inherit}
-mark.h-green{background:#B9E3BE; color:inherit}
-mark.h-blue{background:#B9D6EE; color:inherit}
-mark.h-pink{background:#F0C3DA; color:inherit}
-:root[data-theme="dark"] mark{color:#1B1A16}
-mark{border-radius:2px; cursor:pointer; padding:0 1px}
+
+/* --- Visor paginado --- */
+.reader-wrap{flex:1; overflow:hidden; position:relative; min-height:0;}
+.reader-wrap.cols{overflow:hidden} /* ya no se usa, pero por compatibilidad */
+.pages-viewport{position:absolute; inset:0; overflow:hidden;}
+.pages-track{
+  display:flex;
+  height:100%;
+  transition: transform .28s ease;
+  will-change: transform;
+  column-gap: 40px;
+}
+.page{
+  flex: 0 0 100%;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  padding: 40px max(24px, calc((100% - 640px) / 2)) 40px max(24px, calc((100% - 640px) / 2));
+  font-family: var(--serif);
+  line-height: 1.65;
+  font-size: var(--fs, 19px);
+  column-width: auto;
+}
+/* Dentro de cada .page, el contenido se reparte en columnas para que quepa
+   exactamente una "pantalla" de texto. Sin embargo, al no saber cuántas columnas
+   hay, dejamos que el navegador las cree y naveguemos horizontalmente. */
+.page-inner{
+  column-width: 100%;
+  column-gap: 40px;
+  height: 100%;
+  column-fill: auto;
+}
+.page img{max-width:100%; height:auto}
+.page h1,.page h2,.page h3{font-family:var(--serif); line-height:1.25}
+
+/* --- Subrayados: los 4 colores, forzados con !important --- */
+mark.h-yellow{background:#F6D888 !important; color:inherit !important; padding:1px 2px; border-radius:2px;}
+mark.h-green{background:#B9E3BE !important; color:inherit !important; padding:1px 2px; border-radius:2px;}
+mark.h-blue{background:#B9D6EE !important; color:inherit !important; padding:1px 2px; border-radius:2px;}
+mark.h-pink{background:#F0C3DA !important; color:inherit !important; padding:1px 2px; border-radius:2px;}
+:root[data-theme="dark"] mark{color:#1B1A16 !important}
+mark{border-radius:2px; cursor:pointer; padding:0 1px; -webkit-box-decoration-break:clone; box-decoration-break:clone;}
 mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
+
 .empty{flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:14px; color:var(--ink-soft); text-align:center; padding:24px; overflow-y:auto;}
 .empty .big{font-family:var(--serif); font-size:22px; color:var(--ink)}
 .library{width:100%; max-width:760px; display:flex; flex-direction:column; gap:10px; padding:8px 0 24px;}
@@ -108,8 +139,7 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
 @media (max-width:720px){
   .side{position:fixed; z-index:5; height:100%; transform:translateX(-100%); transition:transform .2s}
   .side.open{transform:translateX(0)}
-  .reader{padding:32px 18px 90px}
-  .reader.cols{column-width:88vw; column-gap:32px; padding:32px 18px}
+  .page{padding:24px 20px}
 }
 </style>
 </head>
@@ -144,7 +174,6 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
       <div class="ctrl">
         <button class="icon" id="fontDown" title="Reducir letra">A−</button>
         <button class="icon" id="fontUp" title="Aumentar letra">A+</button>
-        <button class="icon" id="colsBtn" title="Una / dos columnas">▥</button>
         <button class="icon" id="themeBtn" title="Tema">◐</button>
       </div>
     </div>
@@ -159,11 +188,18 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
           <label class="upload secondary">Añadir EPUB local<input type="file" id="fileLib" accept=".epub"></label>
         </div>
       </div>
+      <div class="pages-viewport" id="pagesViewport" style="display:none">
+        <div class="pages-track" id="pagesTrack"></div>
+      </div>
       <div class="reader" id="reader" style="display:none"></div>
     </div>
     <div class="nav-foot" id="navFoot" style="display:none">
-      <div class="row"><span id="progress"></span><span id="timeLeft"></span></div>
-      <div class="row"><button id="prevBtn">← Anterior</button><button id="nextBtn">Siguiente →</button></div>
+      <div class="row"><span id="progress"></span><span id="pageIndicator"></span><span id="timeLeft"></span></div>
+      <div class="row">
+        <button id="prevBtn">← Anterior</button>
+        <span id="chapterProgress" style="font-size:11px;"></span>
+        <button id="nextBtn">Siguiente →</button>
+      </div>
     </div>
   </div>
 </div>
@@ -187,13 +223,20 @@ let spine=[], zip=null, opfDir='', currentIndex=0, tocItems=[];
 let bookId='', highlights=[], wordCounts=[], totalBookWords=0, pendingRange=null;
 let chapterStart=0, activeMs=0, hidden=false;
 
+// --- Paginación ---
+let currentPage=0;         // página actual dentro del capítulo
+let totalPages=1;          // total de páginas del capítulo
+let pageRestoreTarget=0;   // página a restaurar tras render (0-based)
+
 const $=s=>document.querySelector(s);
 const readerEl=$('#reader'), readerWrap=$('#readerWrap'), emptyEl=$('#emptyState'), tocEl=$('#toc'),
   hlistEl=$('#hlist'), chapterTitleEl=$('#chapterTitle'), navFoot=$('#navFoot'),
   prevBtn=$('#prevBtn'), nextBtn=$('#nextBtn'), progressEl=$('#progress'),
   timeLeftEl=$('#timeLeft'), bookProgress=$('#bookProgress'), selToolbar=$('#selToolbar'),
   libraryListEl=$('#libraryList'), libActionsEl=$('#libActions'), loadingEl=$('#loading'),
-  loadingTextEl=$('#loadingText'), loadingBar=$('#loadingBar'), loadingBarFill=$('#loadingBarFill');
+  loadingTextEl=$('#loadingText'), loadingBar=$('#loadingBar'), loadingBarFill=$('#loadingBarFill'),
+  pagesViewport=$('#pagesViewport'), pagesTrack=$('#pagesTrack'),
+  pageIndicatorEl=$('#pageIndicator'), chapterProgressEl=$('#chapterProgress');
 
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden){ activeMs += Date.now()-chapterStart; hidden=true; }
@@ -234,9 +277,6 @@ let bookSessionId=0;
 let cloudSyncInFlight=0;
 let renderSequence=0;
 
-// Tamaño de cada chunk en bytes ANTES de pasar a base64.
-// Firestore tiene límite de 1 MB por documento; base64 infla ~33%, así que
-// dejamos margen: 600 KB de datos → ~800 KB en base64. Cabe con holgura.
 const CHUNK_SIZE = 600 * 1024;
 
 (function initFirebase(){
@@ -271,9 +311,9 @@ const CHUNK_SIZE = 600 * 1024;
         }catch(e){ console.error('FIREBASE stats read ERROR:', e); }
 
         if(bookId) syncCurrentBookFromCloud().catch(e=>console.error('FIREBASE book sync ERROR:', e));
-        if(readerEl.style.display==='none') loadLibrary();
+        if(pagesViewport.style.display==='none') loadLibrary();
       }else{
-        if(readerEl.style.display==='none') loadLibrary();
+        if(pagesViewport.style.display==='none') loadLibrary();
       }
     });
   }catch(e){
@@ -300,7 +340,12 @@ function pushStats(){ if(!cloudReady) return; try{ fbDb.doc('users/'+cloudUid).s
 function pushBookState(){
   if(!cloudReady || !bookId) return;
   const syncBookId=bookId, syncUid=cloudUid;
-  const data={ currentIndex, highlights, updatedAt: Date.now() };
+  const data={
+    currentIndex,
+    highlights,
+    pageIndex: currentPage,
+    updatedAt: Date.now()
+  };
   try{
     fbDb.doc('users/'+syncUid+'/books/'+syncBookId)
       .set(data, {merge:true})
@@ -332,13 +377,15 @@ async function syncCurrentBookFromCloud(){
     const remoteIndex=typeof remote.currentIndex==='number'
       ? Math.max(0, Math.min(remote.currentIndex, spine.length-1))
       : 0;
+    const remotePage=typeof remote.pageIndex==='number' ? remote.pageIndex : 0;
     const userNavigated=(currentIndex!==syncIndex);
 
     highlights=remoteHighlights;
     saveJSON('epubHl_'+bookId, highlights);
 
     if(!userNavigated){
-      saveJSON('epubProg_'+bookId, {index: remoteIndex});
+      saveJSON('epubProg_'+bookId, {index: remoteIndex, pageIndex: remotePage});
+      pageRestoreTarget = remotePage;
       await renderChapter(remoteIndex);
     }else{
       renderHlist();
@@ -353,9 +400,9 @@ async function syncCurrentBookFromCloud(){
 function arrayBufferToBase64(buf){
   let binary='';
   const bytes=new Uint8Array(buf);
-  const CHUNK=0x8000;
-  for(let i=0;i<bytes.length;i+=CHUNK){
-    binary+=String.fromCharCode.apply(null, bytes.subarray(i, i+CHUNK));
+  const CH=0x8000;
+  for(let i=0;i<bytes.length;i+=CH){
+    binary+=String.fromCharCode.apply(null, bytes.subarray(i, i+CH));
   }
   return btoa(binary);
 }
@@ -369,11 +416,9 @@ function base64ToArrayBuffer(b64){
 
 async function uploadBookToCloud(buf, meta){
   if(!cloudReady || !fbDb) return;
-  // meta: { bookId, title, author, totalChapters }
   const docRef=fbDb.doc('users/'+cloudUid+'/books/'+meta.bookId);
   const existing=await docRef.get();
   if(existing.exists && existing.data().chunks){
-    // Ya está en la nube: solo aseguramos metadatos actualizados.
     await docRef.set({
       title: meta.title, author: meta.author,
       totalChapters: meta.totalChapters||0
@@ -384,7 +429,6 @@ async function uploadBookToCloud(buf, meta){
   const totalChunks=Math.ceil(buf.byteLength / CHUNK_SIZE);
   showLoading('Subiendo a la nube… 0 / '+totalChunks, true);
 
-  // 1) Crear el documento raíz con metadatos y número de chunks.
   await docRef.set({
     bookId: meta.bookId,
     title: meta.title,
@@ -394,10 +438,10 @@ async function uploadBookToCloud(buf, meta){
     size: buf.byteLength,
     addedAt: Date.now(),
     currentIndex: 0,
-    highlights: []
+    highlights: [],
+    pageIndex: 0
   }, {merge:true});
 
-  // 2) Subir cada trozo por separado (por si falla uno, no se pierde todo).
   const chunksCol=docRef.collection('chunks');
   for(let i=0;i<totalChunks;i++){
     const slice=buf.slice(i*CHUNK_SIZE, Math.min((i+1)*CHUNK_SIZE, buf.byteLength));
@@ -420,7 +464,6 @@ async function downloadBookFromCloud(bookIdToLoad){
   if(!totalChunks) throw new Error('Este libro no tiene archivo guardado en la nube.');
 
   const chunksCol=docRef.collection('chunks');
-  // Los chunks se leen en orden secuencial para no saturar memoria ni red.
   const parts=[];
   for(let i=0;i<totalChunks;i++){
     const cs=await chunksCol.doc(String(i)).get();
@@ -429,7 +472,6 @@ async function downloadBookFromCloud(bookIdToLoad){
     setLoadingProgress(Math.round((i+1)/totalChunks*100));
     loadingTextEl.textContent='Descargando libro… '+(i+1)+' / '+totalChunks;
   }
-  // Concatenar todos los ArrayBuffers.
   let total=0; parts.forEach(p=>total+=p.byteLength);
   const out=new Uint8Array(total);
   let off=0; parts.forEach(p=>{ out.set(new Uint8Array(p), off); off+=p.byteLength; });
@@ -495,7 +537,6 @@ function renderLibrary(list){
       ev.stopPropagation();
       if(!confirm('¿Eliminar "'+(b.title||'este libro')+'" de tu biblioteca en la nube?')) return;
       try{
-        // Borrar chunks y luego el doc raíz.
         const chunksCol=fbDb.collection('users/'+cloudUid+'/books/'+b.id+'/chunks');
         const cs=await chunksCol.get();
         const batch=fbDb.batch();
@@ -516,9 +557,13 @@ async function openCloudBook(meta){
   showLoading('Descargando "'+(meta.title||'libro')+'"…', true);
   try{
     const { buf, meta: fullMeta }=await downloadBookFromCloud(meta.id);
-    // Cachea los subrayados y la posición remotos antes de abrir.
     if(Array.isArray(fullMeta.highlights)) saveJSON('epubHl_'+meta.id, fullMeta.highlights);
-    if(typeof fullMeta.currentIndex==='number') saveJSON('epubProg_'+meta.id, {index: fullMeta.currentIndex});
+    if(typeof fullMeta.currentIndex==='number'){
+      saveJSON('epubProg_'+meta.id, {
+        index: fullMeta.currentIndex,
+        pageIndex: typeof fullMeta.pageIndex==='number' ? fullMeta.pageIndex : 0
+      });
+    }
     hideLoading();
     await loadEpub(buf);
   }catch(e){
@@ -528,18 +573,11 @@ async function openCloudBook(meta){
   }
 }
 
-// ---------- theme / font / columns ----------
+// ---------- theme / font ----------
 $('#themeBtn').onclick=()=>{ themeIdx=(themeIdx+1)%themes.length; document.documentElement.setAttribute('data-theme', themes[themeIdx]); };
-$('#fontUp').onclick=()=>{ fontIdx=Math.min(fontIdx+1,fontSizes.length-1); applyFont(); };
-$('#fontDown').onclick=()=>{ fontIdx=Math.max(fontIdx-1,0); applyFont(); };
-function applyFont(){ readerEl.style.setProperty('--fs', fontSizes[fontIdx]+'px'); }
-let twoCol=false;
-$('#colsBtn').onclick=()=>{
-  twoCol=!twoCol;
-  readerEl.classList.toggle('cols', twoCol);
-  readerWrap.classList.toggle('cols', twoCol);
-  $('#colsBtn').classList.toggle('active', twoCol);
-};
+$('#fontUp').onclick=()=>{ fontIdx=Math.min(fontIdx+1,fontSizes.length-1); applyFont(); repaginate(); };
+$('#fontDown').onclick=()=>{ fontIdx=Math.max(fontIdx-1,0); applyFont(); repaginate(); };
+function applyFont(){ document.documentElement.style.setProperty('--fs', fontSizes[fontIdx]+'px'); }
 $('#menuBtn').onclick=()=>$('#side').classList.toggle('open');
 $('#tabToc').onclick=()=>switchTab('toc'); $('#tabHl').onclick=()=>switchTab('hl');
 function switchTab(t){
@@ -616,10 +654,11 @@ async function loadEpub(arrayBuffer){
     const thisSession=++bookSessionId;
 
     highlights=loadJSON('epubHl_'+bookId, []);
-    const prog=loadJSON('epubProg_'+bookId, {index:0});
+    const prog=loadJSON('epubProg_'+bookId, {index:0, pageIndex:0});
+    pageRestoreTarget = (prog.pageIndex && prog.pageIndex>0) ? prog.pageIndex : 0;
 
     emptyEl.style.display='none';
-    readerEl.style.display='block';
+    pagesViewport.style.display='block';
     navFoot.style.display='flex';
     $('#libBtn').style.display='inline-block';
 
@@ -629,7 +668,6 @@ async function loadEpub(arrayBuffer){
     hideLoading();
     computeWordCounts();
 
-    // Subida automática a la nube si hay sesión y aún no está.
     if(cloudReady){
       uploadBookToCloud(arrayBuffer, {
         bookId, title, author, totalChapters: spine.length
@@ -644,7 +682,6 @@ async function loadEpub(arrayBuffer){
       });
     }
 
-    // Sincroniza estado (progreso + subrayados) con la nube en segundo plano.
     if(cloudReady){
       if(thisSession===bookSessionId){
         syncCurrentBookFromCloud().catch(e=>console.error('FIREBASE background sync ERROR:', e));
@@ -681,7 +718,7 @@ async function computeWordCounts(){
 
 function wordsReadSoFar(){
   let sum=0; for(let i=0;i<currentIndex;i++) sum+=wordCounts[i]||0;
-  const frac = readerWrap.scrollHeight>readerWrap.clientHeight ? Math.min(1, readerWrap.scrollTop/(readerWrap.scrollHeight-readerWrap.clientHeight||1)) : 0;
+  const frac = totalPages>1 ? (currentPage/(totalPages-1)) : 0;
   sum += (wordCounts[currentIndex]||0)*frac;
   return sum;
 }
@@ -691,28 +728,90 @@ function updateTimeEstimate(){
   bookProgress.style.width=Math.min(100,(read/totalBookWords*100)).toFixed(1)+'%';
   const remaining=Math.max(0,totalBookWords-read);
   const mins=Math.round(remaining/avgWpm());
-  timeLeftEl.textContent = mins<1 ? 'Casi terminas' : mins<60 ? ('≈ '+mins+' min para terminar') : ('≈ '+Math.floor(mins/60)+'h '+(mins%60)+'m para terminar');
+  timeLeftEl.textContent = mins<1 ? 'Casi terminas' : mins<60 ? ('≈ '+mins+' min') : ('≈ '+Math.floor(mins/60)+'h '+(mins%60)+'m');
 }
-readerWrap.addEventListener('scroll', ()=>{ updateTimeEstimate(); }, {passive:true});
 
 function goTo(i){
   if(i<0 || i>=spine.length) return;
   finishChapterTiming();
+  pageRestoreTarget=0;
   renderChapter(i).catch(e=>{
     console.error('Error renderizando capítulo:', e);
-    readerEl.innerHTML='<p>No se pudo cargar este capítulo.</p>';
   });
 }
-prevBtn.onclick=()=>goTo(currentIndex-1);
-nextBtn.onclick=()=>goTo(currentIndex+1);
-document.addEventListener('keydown', e=>{ if(e.key==='ArrowRight') goTo(currentIndex+1); if(e.key==='ArrowLeft') goTo(currentIndex-1); });
-window.addEventListener('beforeunload', finishChapterTiming);
+
+// --- Navegación por páginas ---
+function nextPage(){
+  if(currentPage < totalPages-1){
+    currentPage++;
+    applyPageTransform();
+    pushBookState();
+    updatePageUI();
+  }else{
+    // Última página del capítulo: pasa al siguiente capítulo si existe.
+    if(currentIndex < spine.length-1) goTo(currentIndex+1);
+  }
+}
+function prevPage(){
+  if(currentPage > 0){
+    currentPage--;
+    applyPageTransform();
+    pushBookState();
+    updatePageUI();
+  }else{
+    // Primera página: vuelve al capítulo anterior (última página).
+    if(currentIndex > 0){
+      goTo(currentIndex-1);
+      // Tras render, ir a la última página del capítulo previo.
+      pendingGoLastPage=true;
+    }
+  }
+}
+let pendingGoLastPage=false;
+
+prevBtn.onclick=prevPage;
+nextBtn.onclick=nextPage;
+document.addEventListener('keydown', e=>{
+  if(e.key==='ArrowRight') nextPage();
+  if(e.key==='ArrowLeft') prevPage();
+});
+window.addEventListener('beforeunload', ()=>{ finishChapterTiming(); pushBookState(); });
 function finishChapterTiming(){
   if(!spine.length) return;
   const ms = activeMs + (hidden?0:(Date.now()-chapterStart));
   recordSession(wordCounts[currentIndex]||0, ms/60000);
   activeMs=0;
 }
+
+function applyPageTransform(){
+  const vpWidth=pagesViewport.clientWidth;
+  const gap=40; // debe coincidir con .pages-track { column-gap }
+  pagesTrack.style.transform='translateX(-'+currentPage*(vpWidth+gap)+'px)';
+  updatePageUI();
+}
+function updatePageUI(){
+  pageIndicatorEl.textContent = 'Página '+(currentPage+1)+' / '+totalPages;
+  chapterProgressEl.textContent = 'Cap. '+(currentIndex+1)+' / '+spine.length;
+  prevBtn.disabled = (currentIndex===0 && currentPage===0);
+  nextBtn.disabled = (currentIndex===spine.length-1 && currentPage===totalPages-1);
+}
+
+// Recalcula la paginación al cambiar tamaño de ventana o tamaño de letra.
+let repaginateTimer=null;
+function repaginate(){
+  if(!spine.length) return;
+  clearTimeout(repaginateTimer);
+  repaginateTimer=setTimeout(()=>{
+    // Guardamos la página relativa (fracción) para no perder la posición.
+    const frac = totalPages>1 ? currentPage/(totalPages-1) : 0;
+    renderChapter(currentIndex).then(()=>{
+      // Reposiciona a la página equivalente tras el repaginado.
+      currentPage=Math.round(frac*(totalPages-1));
+      applyPageTransform();
+    });
+  }, 300);
+}
+window.addEventListener('resize', repaginate);
 
 async function renderChapter(index){
   if(index<0||index>=spine.length) return;
@@ -722,12 +821,12 @@ async function renderChapter(index){
   activeMs=0;
   const renderBookId=bookId;
 
-  saveJSON('epubProg_'+renderBookId, {index});
+  saveJSON('epubProg_'+renderBookId, {index, pageIndex: 0});
   pushBookState();
 
   const path=spine[index];
   const file=await findFile(path);
-  if(!file){ readerEl.innerHTML='<p>No se pudo cargar este capítulo.</p>'; return; }
+  if(!file){ pagesTrack.innerHTML='<div class="page"><div class="page-inner"><p>No se pudo cargar este capítulo.</p></div></div>'; return; }
   let html=await file.async('string');
 
   if(thisRender!==renderSequence || renderBookId!==bookId) return;
@@ -744,9 +843,88 @@ async function renderChapter(index){
 
   if(thisRender!==renderSequence || renderBookId!==bookId) return;
 
-  readerEl.innerHTML=body.innerHTML;
-  readerWrap.scrollTop=0;
-  readerWrap.scrollLeft=0;
+  // Medimos cuántas "pantallas" hacen falta para mostrar el contenido.
+  // En vez de una sola .page con scroll horizontal, creamos N .page, cada una
+  // con su propio .page-inner que corta el contenido con column-fill.
+  pagesTrack.innerHTML='';
+  pagesTrack.style.transform='translateX(0)';
+  currentPage=0;
+
+  const firstPage=document.createElement('div');
+  firstPage.className='page';
+  const inner=document.createElement('div');
+  inner.className='page-inner';
+  inner.innerHTML=body.innerHTML;
+  firstPage.appendChild(inner);
+  pagesTrack.appendChild(firstPage);
+
+  // Ahora medimos cuántas columnas caben en el contenedor.
+  // Forzamos al .page-inner a tener column-width igual al ancho visible para
+  // que el navegador genere tantas columnas como haga falta.
+  await new Promise(r=>requestAnimationFrame(r));
+
+  const vpWidth=pagesViewport.clientWidth;
+  const gap=40;
+  const pageStyle=getComputedStyle(firstPage);
+  const padLeft=parseFloat(pageStyle.paddingLeft)||0;
+  const padRight=parseFloat(pageStyle.paddingRight)||0;
+  const contentWidth=vpWidth-padLeft-padRight;
+
+  // column-width = contentWidth; column-gap = gap.
+  inner.style.columnWidth=contentWidth+'px';
+  inner.style.columnGap=gap+'px';
+  inner.style.height='100%';
+  inner.style.columnFill='auto';
+
+  await new Promise(r=>requestAnimationFrame(r));
+
+  // scrollWidth del inner nos dice el ancho total de todas las columnas.
+  const totalWidth=inner.scrollWidth;
+  const columnStep=contentWidth+gap;
+  const cols=Math.max(1, Math.round((totalWidth+gap)/columnStep));
+  totalPages=cols;
+
+  // Ahora "desarmamos" la columna única: en vez de una .page con N columnas,
+  // dejamos la .page con una sola columna y creamos N .page copiando solo lo
+  // que corresponde a cada columna. Esto es lo más simple y robusto.
+  // Estrategia práctica: usamos la .page original con N columnas y movemos
+  // el viewport horizontalmente por cada columna. Es decir, hacemos que
+  // .page tenga ancho N*(contentWidth+gap) y que .pages-track no lo recorte.
+
+  // Revertimos: una sola .page con su inner en columnas, y navegamos con
+  // translateX según el número de columnas.
+  pagesTrack.innerHTML='';
+  const onlyPage=document.createElement('div');
+  onlyPage.className='page';
+  onlyPage.style.flex='0 0 auto';
+  onlyPage.style.width='auto';
+  onlyPage.style.paddingRight=pageStyle.paddingRight;
+  onlyPage.style.paddingLeft=pageStyle.paddingLeft;
+  const innerOnly=document.createElement('div');
+  innerOnly.className='page-inner';
+  innerOnly.style.columnWidth=contentWidth+'px';
+  innerOnly.style.columnGap=gap+'px';
+  innerOnly.style.height='100%';
+  innerOnly.style.columnFill='auto';
+  innerOnly.style.width=totalWidth+'px';
+  innerOnly.innerHTML=body.innerHTML;
+  onlyPage.appendChild(innerOnly);
+  // Le damos al .pages-track el mismo ancho que el contenido total para que
+  // el translateX funcione como un "salto de página".
+  pagesTrack.style.width='auto';
+  pagesTrack.style.display='block';
+  pagesTrack.appendChild(onlyPage);
+
+  // El .page original no tiene restricción de ancho, así que el .pages-track
+  // lo deja fluir. Pero .pages-viewport tiene overflow:hidden, así que solo
+  // vemos la primera "pantalla". Movemos con translateX sobre .pages-track.
+  // Para que el ancho del .pages-track sea el del viewport, envolvemos:
+  onlyPage.style.position='relative';
+
+  // Simplificamos: aplicamos translateX directamente a innerOnly.
+  pagesTrack.style.transform='none';
+  innerOnly.style.transition='transform .28s ease';
+  pagesTrack.dataset.mode='single';
 
   applyHighlights();
   renderHlist();
@@ -754,12 +932,40 @@ async function renderChapter(index){
   const active=tocItems.find(t=>t.href.split('#')[0]===path.split('#')[0]);
   chapterTitleEl.textContent=active?active.label:'';
   progressEl.textContent=(index+1)+' / '+spine.length;
-  prevBtn.disabled=index===0; nextBtn.disabled=index===spine.length-1;
-  [...tocEl.children].forEach((btn,i)=>{ btn.classList.toggle('active', tocItems[i]&&tocItems[i].href.split('#')[0]===path.split('#')[0]); });
+
+  // Restaurar página objetivo.
+  let target=pageRestoreTarget||0;
+  if(pendingGoLastPage){ target=totalPages-1; pendingGoLastPage=false; }
+  pageRestoreTarget=0;
+  currentPage=Math.max(0, Math.min(target, totalPages-1));
+  applyPageTransformTo(innerOnly, currentPage);
+
   updateTimeEstimate();
+  updatePageUI();
+
+  // Vuelve a aplicar los highlights tras cualquier cambio de layout.
+  requestAnimationFrame(()=>applyHighlights());
 }
 
-// ---------- highlights ----------
+// Aplica translateX a la página para mostrar la columna N.
+function applyPageTransformTo(el, pageIdx){
+  const vpWidth=pagesViewport.clientWidth;
+  const pageStyle=getComputedStyle(el.parentElement);
+  const padLeft=parseFloat(pageStyle.paddingLeft)||0;
+  const padRight=parseFloat(pageStyle.paddingRight)||0;
+  const contentWidth=vpWidth-padLeft-padRight;
+  const gap=40;
+  el.style.transform='translateX(-'+pageIdx*(contentWidth+gap)+'px)';
+}
+
+// Envuelve applyPageTransform para que actúe sobre el inner actual.
+function applyPageTransform(){
+  const inner=pagesTrack.querySelector('.page-inner');
+  if(inner) applyPageTransformTo(inner, currentPage);
+  updatePageUI();
+}
+
+// ---------- highlights (los 4 colores) ----------
 function nodeOffset(container, node, offsetInNode){
   let charIndex=0; const w=document.createTreeWalker(container, NodeFilter.SHOW_TEXT); let n;
   while(n=w.nextNode()){ if(n===node) return charIndex+offsetInNode; charIndex+=n.length; } return -1;
@@ -776,27 +982,44 @@ function rangeFromOffsets(container, start, end){
   if(!startNode||!endNode) return null;
   const r=document.createRange(); r.setStart(startNode,startOffset); r.setEnd(endNode,endOffset); return r;
 }
+
+// Envuelve SIEMPRE cada nodo de texto por separado. Así funciona igual con los
+// 4 colores y no depende de surroundContents (que falla si cruza bloques).
 function applyHighlights(){
   const chHref=spine[currentIndex];
   const hs=highlights.filter(h=>h.href===chHref).sort((a,b)=>a.start-b.start);
   hs.forEach(h=>{
-    const r=rangeFromOffsets(readerEl, h.start, h.end); if(!r) return;
-    const mark=document.createElement('mark');
-    mark.className='h-'+h.color+(h.comment?' has-cmt':'');
-    mark.dataset.id=h.id;
-    try{ const frag=r.extractContents(); mark.appendChild(frag); r.insertNode(mark); }catch(e){}
-    mark.onclick=()=>openHlPopup(h.id);
+    const r=rangeFromOffsets(pagesTrack, h.start, h.end); if(!r) return;
+    try{
+      const frag=r.extractContents();
+      const walker=document.createTreeWalker(frag, NodeFilter.SHOW_TEXT);
+      const textNodes=[];
+      let n; while(n=walker.nextNode()) textNodes.push(n);
+      if(!textNodes.length){ r.insertNode(frag); return; }
+      textNodes.forEach(tn=>{
+        if(!tn.nodeValue || !tn.nodeValue.trim()) return;
+        const m=document.createElement('mark');
+        m.className='h-'+h.color+(h.comment?' has-cmt':'');
+        m.dataset.id=h.id;
+        m.onclick=()=>openHlPopup(h.id);
+        tn.parentNode.replaceChild(m, tn);
+        m.appendChild(tn);
+      });
+      r.insertNode(frag);
+    }catch(e){ console.warn('applyHighlights:', e); }
   });
 }
-readerEl.addEventListener('mouseup', onSelectionMaybe);
-readerEl.addEventListener('touchend', onSelectionMaybe);
+
+pagesViewport.addEventListener('mouseup', onSelectionMaybe);
+pagesViewport.addEventListener('touchend', onSelectionMaybe);
 function onSelectionMaybe(){
   setTimeout(()=>{
     const sel=window.getSelection();
     if(!sel || sel.isCollapsed || sel.rangeCount===0){ selToolbar.classList.remove('show'); return; }
     const range=sel.getRangeAt(0);
-    if(!readerEl.contains(range.commonAncestorContainer)){ return; }
-    pendingRange={ start:nodeOffset(readerEl, range.startContainer, range.startOffset), end:nodeOffset(readerEl, range.endContainer, range.endOffset), text:sel.toString().slice(0,140) };
+    if(!pagesViewport.contains(range.commonAncestorContainer)){ return; }
+    const root=pagesTrack;
+    pendingRange={ start:nodeOffset(root, range.startContainer, range.startOffset), end:nodeOffset(root, range.endContainer, range.endOffset), text:sel.toString().slice(0,140) };
     if(pendingRange.start<0||pendingRange.end<0||pendingRange.start===pendingRange.end) return;
     const rect=range.getBoundingClientRect();
     selToolbar.style.left=Math.max(8, rect.left+rect.width/2-70)+'px';
@@ -835,7 +1058,7 @@ function renderHlist(){
   highlights.slice().reverse().forEach(h=>{
     const idx=spine.indexOf(h.href);
     const card=document.createElement('div'); card.className='hl-card';
-    card.innerHTML='<span class="swatch" style="background:'+colorDot[h.color]+'"></span><span class="snippet">'+escapeHtml(h.text)+'</span>'+(h.comment?'<div class="cmt">'+escapeHtml(h.comment)+'</div>':'');
+    card.innerHTML='<span class="swatch" style="background:'+(colorDot[h.color]||'#F6D888')+'"></span><span class="snippet">'+escapeHtml(h.text)+'</span>'+(h.comment?'<div class="cmt">'+escapeHtml(h.comment)+'</div>':'');
     card.onclick=()=>{ goTo(idx); $('#side').classList.remove('open'); };
     hlistItemsEl.appendChild(card);
   });
@@ -925,8 +1148,11 @@ $('#expDocx').onclick=exportDocx;
 // ---------- Eventos de archivo y biblioteca ----------
 function goToLibrary(){
   finishChapterTiming();
+  pushBookState();
   spine=[]; zip=null; bookId=''; highlights=[]; wordCounts=[]; totalBookWords=0;
-  readerEl.style.display='none';
+  pageRestoreTarget=0; currentPage=0; totalPages=1;
+  pagesViewport.style.display='none';
+  pagesTrack.innerHTML='';
   navFoot.style.display='none';
   $('#libBtn').style.display='none';
   $('#bookTitle').textContent='Sin libro cargado';
