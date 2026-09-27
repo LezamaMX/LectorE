@@ -62,7 +62,7 @@ input[type=file]{display:none}
 .bookbar{height:3px; background:var(--line); position:relative; flex-shrink:0;}
 .bookbar i{position:absolute; left:0; top:0; height:100%; background:var(--accent); width:0%; transition:width .3s}
 
-/* -------- Visor paginado: páginas explícitas -------- */
+/* -------- Visor paginado -------- */
 .reader-wrap{
   flex:1;
   position:relative;
@@ -79,7 +79,10 @@ input[type=file]{display:none}
   overflow:hidden;
 }
 .page-view.active{display:block}
-.page-inner{
+
+/* La "página" en sí: rejilla de 2 filas: contenido scrollable internamente pero
+   recortado a la altura del viewport. */
+.page{
   width:100%;
   height:100%;
   padding: 40px 0;
@@ -87,22 +90,19 @@ input[type=file]{display:none}
   line-height: 1.65;
   font-size: var(--fs, 19px);
   overflow:hidden;
-  position:relative;
 }
-/* Envoltura interior que limita el ancho del texto y centra. */
-.page-content{
-  width:100%;
+.page-inner{
   max-width:720px;
   height:100%;
   margin:0 auto;
-  padding:0 max(20px, 4vw);
+  padding: 0 max(20px, 4vw);
   overflow:hidden;
 }
 
-/* --- Imágenes: se ajustan SIEMPRE al contenedor, sin cortarse --- */
-.page-content img,
-.page-content svg,
-.page-content image{
+/* --- Imágenes: siempre ajustadas, nunca cortadas --- */
+.page-inner img,
+.page-inner svg,
+.page-inner image{
   max-width:100% !important;
   max-height:100% !important;
   width:auto !important;
@@ -111,27 +111,28 @@ input[type=file]{display:none}
   display:block;
   margin: 10px auto;
 }
-.page-content figure{
+.page-inner figure{
   margin: 10px 0;
   max-width:100%;
 }
-.page-content p{margin:0 0 1em}
+.page-inner p{margin:0 0 1em}
 
-/* Capítulo solo-imagen (portada, ilustración): centrado, sin recortes */
-.page-content.image-page{
+/* Capítulo solo-imagen: la imagen ocupa lo que pueda, centrada, sin cortar. */
+.page-inner.image-page{
   display:flex;
   align-items:center;
   justify-content:center;
   padding:20px;
 }
-.page-content.image-page img,
-.page-content.image-page svg{
+.page-inner.image-page img,
+.page-inner.image-page svg,
+.page-inner.image-page image{
   max-width:100% !important;
   max-height:100% !important;
   width:auto !important;
   height:auto !important;
   object-fit:contain !important;
-  margin:auto;
+  margin:auto !important;
 }
 
 /* --- Subrayados --- */
@@ -177,7 +178,8 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
 @media (max-width:720px){
   .side{position:fixed; z-index:5; height:100%; transform:translateX(-100%); transition:transform .2s}
   .side.open{transform:translateX(0)}
-  .page-content{padding:0 16px;}
+  .page{padding:24px 0}
+  .page-inner{padding:0 16px;}
   .lib-card .cover{width:48px; height:66px;}
 }
 </style>
@@ -937,7 +939,7 @@ async function renderChapter(index){
   const path=spine[index];
   const file=await findFile(path);
   if(!file){
-    pagesHost.innerHTML='<div class="page-view active"><div class="page-inner"><div class="page-content"><p>No se pudo cargar este capítulo.</p></div></div></div>';
+    pagesHost.innerHTML='<div class="page-view active"><div class="page"><div class="page-inner"><p>No se pudo cargar este capítulo.</p></div></div></div>';
     pageNodes=[pagesHost.querySelector('.page-view')];
     totalPages=1;
     return;
@@ -949,7 +951,7 @@ async function renderChapter(index){
   const doc=new DOMParser().parseFromString(html,'application/xhtml+xml');
   const body=doc.querySelector('body')||doc.documentElement;
 
-  // Sustituye imágenes y svg-image por blob URLs para que se vean.
+  // Sustituye imágenes por blob URLs.
   for(const img of body.querySelectorAll('img, image')){
     const attr=img.hasAttribute('src')?'src':(img.hasAttribute('xlink:href')?'xlink:href':null);
     if(!attr) continue;
@@ -960,27 +962,39 @@ async function renderChapter(index){
 
   if(thisRender!==renderSequence || renderBookId!==bookId) return;
 
-  // ¿Es capítulo "solo imagen"?
+  // ¿Solo imagen?
   const textContent=(body.textContent||'').replace(/\s+/g,'').trim();
-  const imgCount=body.querySelectorAll('img, image').length;
-  const onlyImage = imgCount>0 && textContent.length<20;
+  const imgEls=body.querySelectorAll('img, image');
+  const onlyImage = imgEls.length>0 && textContent.length<20;
 
-  // Paginación por bloques (medida página a página real, sin staging suelto).
-  const pages = await paginateChapter(body, onlyImage);
-
-  if(thisRender!==renderSequence || renderBookId!==bookId) return;
-
-  totalPages=pages.length;
-
-  pagesHost.innerHTML='';
-  pageNodes=[];
-  pages.forEach((pageEl, idx)=>{
-    const view=document.createElement('div');
-    view.className='page-view'+(idx===0?' active':'');
-    view.appendChild(pageEl);
-    pagesHost.appendChild(view);
-    pageNodes.push(view);
-  });
+  if(onlyImage){
+    // Una sola página con la imagen centrada y ajustada.
+    const pageView=document.createElement('div');
+    pageView.className='page-view active';
+    const page=document.createElement('div');
+    page.className='page';
+    const inner=document.createElement('div');
+    inner.className='page-inner image-page';
+    inner.innerHTML=body.innerHTML;
+    // Forzamos a cada imagen a ajustarse por ancho y alto.
+    inner.querySelectorAll('img, image').forEach(img=>{
+      img.style.cssText+=';max-width:100% !important;max-height:100% !important;width:auto !important;height:auto !important;object-fit:contain !important;display:block;margin:auto;';
+    });
+    page.appendChild(inner);
+    pageView.appendChild(page);
+    pagesHost.innerHTML='';
+    pagesHost.appendChild(pageView);
+    pageNodes=[pageView];
+    totalPages=1;
+  }else{
+    // Paginación por bloques pero ahora sí partiendo bloques grandes.
+    const pageViews=await paginateContent(body);
+    if(thisRender!==renderSequence || renderBookId!==bookId) return;
+    pagesHost.innerHTML='';
+    pageNodes=pageViews;
+    pageViews.forEach((v,idx)=>v.classList.toggle('active', idx===0));
+    totalPages=pageViews.length;
+  }
 
   applyHighlights();
   renderHlist();
@@ -999,7 +1013,269 @@ async function renderChapter(index){
   updatePageUI();
 }
 
-// --- Utilidad: espera a que carguen las imágenes del body ---
+// --- Paginación por bloques CON parte de bloques grandes. ---
+//
+// Estrategia:
+//   1. Se crea una página real ("modelo") y se inserta en el DOM, oculta,
+//      con las dimensiones exactas de una página visible.
+//   2. Se van añadiendo bloques del body al modelo.
+//   3. Si un bloque no cabe entero, se **parte** el bloque: la primera mitad
+//      queda en la página actual, la segunda pasa a la nueva página como un
+//      bloque nuevo de la cola.
+//   4. Solo las imágenes se dejan intactas (no se parten); si no caben, se
+//      escalan por CSS para no cortarse.
+async function paginateContent(body){
+  await preloadImages(body);
+
+  // Aplanamos: si el body tiene un solo <div>/<section> con todo el contenido,
+  // bajamos un nivel para poder paginar por párrafos.
+  let host=body;
+  if(body.children.length===1){
+    const c=body.children[0];
+    if((c.tagName==='DIV'||c.tagName==='SECTION'||c.tagName==='ARTICLE') && c.children.length>1){
+      host=c;
+    }
+  }
+
+  // Recolectamos bloques: cada elemento hijo de host, más los nodos de texto.
+  const queue=[];
+  for(const node of [...host.childNodes]){
+    if(node.nodeType===Node.ELEMENT_NODE){
+      queue.push(node.cloneNode(true));
+    }else if(node.nodeType===Node.TEXT_NODE && node.nodeValue.trim()){
+      const p=document.createElement('p');
+      p.textContent=node.nodeValue;
+      queue.push(p);
+    }
+  }
+
+  // Página modelo para medir. Fuera de pantalla pero con medidas reales.
+  const modelView=document.createElement('div');
+  modelView.className='page-view';
+  modelView.style.position='absolute';
+  modelView.style.visibility='hidden';
+  modelView.style.left='-99999px';
+  modelView.style.top='0';
+  modelView.style.width=readerWrap.clientWidth+'px';
+  modelView.style.height=readerWrap.clientHeight+'px';
+  const modelPage=document.createElement('div');
+  modelPage.className='page';
+  const modelInner=document.createElement('div');
+  modelInner.className='page-inner';
+  modelPage.appendChild(modelInner);
+  modelView.appendChild(modelPage);
+  pagesHost.appendChild(modelView);
+
+  void modelView.offsetHeight;
+  const limitH=modelInner.clientHeight;
+  const limitW=modelInner.clientWidth;
+
+  // Estructura de páginas finales.
+  const finalPages=[]; // {view, inner}
+  function newFinalPage(){
+    const view=document.createElement('div');
+    view.className='page-view';
+    const page=document.createElement('div');
+    page.className='page';
+    const inner=document.createElement('div');
+    inner.className='page-inner';
+    page.appendChild(inner);
+    view.appendChild(page);
+    finalPages.push({view, inner});
+    return {view, inner};
+  }
+
+  let current=newFinalPage();
+
+  // Función que comprueba si "contentInner" + un clon cabe en limitH.
+  function fits(inner, el){
+    inner.appendChild(el);
+    const ok = inner.scrollHeight <= limitH + 1;
+    if(!ok) inner.removeChild(el);
+    return ok;
+  }
+
+  // Inserta un bloque, partiéndolo si es necesario.
+  // Devuelve true si todo se colocó, false si no cupo nada (y por tanto
+  // hay que pasar a nueva página antes de reintentarlo).
+  async function placeBlock(block){
+    // Si cabe entero, lo ponemos.
+    const clone=block.cloneNode(true);
+    if(fits(current.inner, clone)) return true;
+
+    // No cabe. ¿La página actual está vacía? Entonces este bloque es más
+    // grande que una página entera y hay que partirlo o dejarlo (imagen).
+    const isEmpty = current.inner.childNodes.length===0;
+
+    if(isImageBlock(block)){
+      // No se parte. Si la página está vacía, se queda aquí y se escala por CSS.
+      if(isEmpty){
+        current.inner.appendChild(clone);
+        return true;
+      }
+      // Si no está vacía, va a la siguiente página.
+      return false;
+    }
+
+    // Es un bloque de texto/contenedor: intentamos partirlo.
+    const parts=await splitBlock(block, limitW, limitH, current.inner, isEmpty);
+    if(!parts || parts.length<2){
+      // No se pudo partir. Si la página está vacía, lo dejamos aquí aunque
+      // se recorte ligeramente (muy raro). Si no, va a la siguiente.
+      if(isEmpty){ current.inner.appendChild(clone); return true; }
+      return false;
+    }
+
+    // parts[0] cabe en la página actual. parts[1..] van a la siguiente.
+    // Si la página está vacía, parts[0] ya cabe por definición del split.
+    current.inner.appendChild(parts[0]);
+    // Empujamos el resto al frente de la cola.
+    queue.unshift(...parts.slice(1));
+    return true;
+  }
+
+  // Bucle principal.
+  while(queue.length){
+    const block=queue.shift();
+    const ok=await placeBlock(block);
+    if(!ok){
+      // No cabía en la página actual: abrimos nueva página y reintentamos.
+      current=newFinalPage();
+      queue.unshift(block);
+    }
+  }
+
+  pagesHost.removeChild(modelView);
+
+  // Filtramos páginas vacías.
+  const filtered=finalPages.filter(p=>{
+    return p.inner.textContent.trim().length>0 || p.inner.querySelector('img,svg,image');
+  }).map(p=>p.view);
+
+  return filtered.length?filtered:[newFinalPage().view];
+}
+
+function isImageBlock(block){
+  if(block.tagName==='IMG') return true;
+  const hasImg=block.querySelector && block.querySelector('img,svg,image');
+  const text=(block.textContent||'').trim();
+  return !!hasImg && text.length<5;
+}
+
+// Intenta partir un bloque en trozos que quepan en limitH.
+// Devuelve array de clones o null si no puede.
+async function splitBlock(block, limitW, limitH, targetInner, targetEmpty){
+  // Si es un contenedor con hijos, repartimos los hijos.
+  if(block.children && block.children.length>=2){
+    return splitContainerChildren(block, limitW, limitH, targetInner, targetEmpty);
+  }
+  // Si tiene texto propio largo, partimos por palabras.
+  if(block.children && block.children.length===0 && block.textContent.trim().length>0){
+    return splitTextBlock(block, limitW, limitH, targetInner, targetEmpty);
+  }
+  return null;
+}
+
+// Reparte los hijos de un contenedor entre varias páginas, respetando
+// el alto de cada página.
+function splitContainerChildren(block, limitW, limitH, targetInner, targetEmpty){
+  const parts=[];
+  let buf=block.cloneNode(false);
+  // Medidor temporal.
+  const probe=document.createElement('div');
+  probe.className='page-inner';
+  probe.style.position='absolute';
+  probe.style.visibility='hidden';
+  probe.style.left='-99999px';
+  probe.style.top='0';
+  probe.style.width=limitW+'px';
+  probe.style.height=limitH+'px';
+  document.body.appendChild(probe);
+
+  // Si la página actual tiene contenido, empezamos desde "vacío" para
+  // garantizar que parts[0] se pueda añadir sin desbordar.
+  const startOffset = targetEmpty ? 0 : targetInner.childNodes.length;
+
+  for(const child of [...block.children]){
+    buf.appendChild(child.cloneNode(true));
+
+    // Medimos: si el buffer cabe en la página actual cuando target está vacío,
+    // o cabe si target está vacío, bien.
+    probe.innerHTML='';
+    if(startOffset){
+      // Simulamos la página actual + buf.
+      for(const n of targetInner.childNodes) probe.appendChild(n.cloneNode(true));
+    }
+    probe.appendChild(buf.cloneNode(true));
+
+    if(probe.scrollHeight > limitH && buf.children.length>1){
+      // No cabe. Sacamos el último hijo del buf y cerramos este trozo.
+      buf.removeChild(buf.lastChild);
+      parts.push(buf);
+      buf=block.cloneNode(false);
+      buf.appendChild(child.cloneNode(true));
+    }
+  }
+  if(buf.children.length) parts.push(buf);
+  document.body.removeChild(probe);
+  return parts.length>0?parts:null;
+}
+
+// Parte un bloque con texto plano por palabras, para que quepa en limitH.
+function splitTextBlock(block, limitW, limitH, targetInner, targetEmpty){
+  const text=block.textContent;
+  const words=text.split(/(\s+)/); // conserva espacios
+  const probe=document.createElement('div');
+  probe.className='page-inner';
+  probe.style.position='absolute';
+  probe.style.visibility='hidden';
+  probe.style.left='-99999px';
+  probe.style.top='0';
+  probe.style.width=limitW+'px';
+  probe.style.height=limitH+'px';
+  document.body.appendChild(probe);
+
+  const parts=[];
+  let current=block.cloneNode(false);
+  current.textContent='';
+  let currentText='';
+
+  // Función para probar si un texto cabe.
+  function testText(txt){
+    probe.innerHTML='';
+    if(!targetEmpty){
+      // En la práctica, cuando target no está vacío, ya no llegamos aquí
+      // porque splitContainerChildren se encarga. Solo por seguridad:
+      for(const n of targetInner.childNodes) probe.appendChild(n.cloneNode(true));
+    }
+    const el=block.cloneNode(false);
+    el.textContent=txt;
+    probe.appendChild(el);
+    return probe.scrollHeight <= limitH;
+  }
+
+  let buf='';
+  for(let i=0;i<words.length;i++){
+    const tentative=buf+words[i];
+    if(testText(tentative)){
+      buf=tentative;
+    }else{
+      // Cerramos este trozo.
+      const el=block.cloneNode(false);
+      el.textContent=buf.trim();
+      parts.push(el);
+      buf=words[i];
+    }
+  }
+  if(buf.trim()){
+    const el=block.cloneNode(false);
+    el.textContent=buf.trim();
+    parts.push(el);
+  }
+  document.body.removeChild(probe);
+  return parts.length>0?parts:null;
+}
+
 function preloadImages(root){
   const imgs=[...root.querySelectorAll('img')];
   if(!imgs.length) return Promise.resolve();
@@ -1011,190 +1287,6 @@ function preloadImages(root){
       setTimeout(res, 3000);
     });
   }));
-}
-
-// --- Paginación del capítulo: crea N .page-inner, cada uno con contenido que
-//     cabe exactamente en el alto disponible del .page-inner real. ---
-//
-// Estrategia:
-//   1. Construimos una página "real" que ya está en el DOM (visible) con el
-//      tamaño final. La llamamos "target". Sabemos su clientHeight y clientWidth.
-//   2. Vamos añadiendo bloques del body a su .page-content interno.
-//   3. Cuando el scrollHeight del .page-content excede el clientHeight, sacamos
-//      el último bloque a una nueva página y continuamos.
-//   4. Si un bloque es más alto que una página, lo partimos por sus hijos.
-async function paginateChapter(body, onlyImage){
-  // Espera a que carguen las imágenes antes de medir.
-  await preloadImages(body);
-
-  if(onlyImage){
-    // Una sola página con el contenido tal cual, centrado por CSS (.image-page).
-    const page=document.createElement('div');
-    page.className='page-inner';
-    const content=document.createElement('div');
-    content.className='page-content image-page';
-    content.innerHTML=body.innerHTML;
-    page.appendChild(content);
-    return [page];
-  }
-
-  // Creamos una página "modelo" para medir, ya insertada en el DOM, pero
-  // fuera de vista, con exactamente las mismas dimensiones que una página real.
-  const modelPage=document.createElement('div');
-  modelPage.className='page-inner';
-  modelPage.style.position='absolute';
-  modelPage.style.visibility='hidden';
-  modelPage.style.left='-99999px';
-  modelPage.style.top='0';
-  modelPage.style.width=readerWrap.clientWidth+'px';
-  modelPage.style.height=readerWrap.clientHeight+'px';
-  const modelContent=document.createElement('div');
-  modelContent.className='page-content';
-  modelPage.appendChild(modelContent);
-  pagesHost.appendChild(modelPage);
-
-  // Fuerza layout y mide la caja interna.
-  void modelPage.offsetHeight;
-  const contentH=modelContent.clientHeight;
-  const contentW=modelContent.clientWidth;
-
-  // Recolecta bloques de primer nivel del body.
-  // Aplana un nivel si el body tiene un solo hijo contenedor.
-  let blockHost=body;
-  const childEls=[...body.children];
-  if(childEls.length===1 && body.textContent.trim().length>100 &&
-     (childEls[0].tagName==='DIV'||childEls[0].tagName==='SECTION'||childEls[0].tagName==='ARTICLE')){
-    blockHost=childEls[0];
-  }
-
-  const sourceBlocks=[...blockHost.childNodes].filter(n=>{
-    if(n.nodeType===Node.TEXT_NODE) return n.nodeValue.trim().length>0;
-    if(n.nodeType===Node.ELEMENT_NODE) return true;
-    return false;
-  }).map(n=>{
-    if(n.nodeType===Node.TEXT_NODE){
-      const p=document.createElement('p');
-      p.textContent=n.nodeValue;
-      return p;
-    }
-    return n.cloneNode(true);
-  });
-
-  // Páginas finales.
-  const pages=[];
-  // Función que crea una página vacía (page-inner + page-content).
-  function newPage(){
-    const p=document.createElement('div');
-    p.className='page-inner';
-    const c=document.createElement('div');
-    c.className='page-content';
-    p.appendChild(c);
-    return { page:p, content:c };
-  }
-
-  let current=newPage();
-  modelContent.appendChild(current.page);
-
-  // Copia los atributos de ancho del modelo al page real para que coincida.
-  current.content.style.width=contentW+'px';
-  current.content.style.height=contentH+'px';
-
-  for(let i=0;i<sourceBlocks.length;i++){
-    let block=sourceBlocks[i];
-    const clone=block.cloneNode(true);
-    current.content.appendChild(clone);
-
-    // ¿Se pasó de alto?
-    if(current.content.scrollHeight > contentH && current.content.childNodes.length>1){
-      // Saca el último bloque y crea nueva página con él.
-      current.content.removeChild(clone);
-      pages.push(current.page);
-      current=newPage();
-      current.content.style.width=contentW+'px';
-      current.content.style.height=contentH+'px';
-      modelContent.innerHTML='';
-      modelContent.appendChild(current.page);
-      current.content.appendChild(clone);
-    }
-
-    // ¿El bloque por sí solo supera la página?
-    if(current.content.scrollHeight > contentH && current.content.childNodes.length===1){
-      // Intenta partirlo.
-      const big=current.content.firstChild;
-      const halves=await splitBlockToFit(big, contentW, contentH);
-      if(halves && halves.length>1){
-        current.content.removeChild(big);
-        // Primera mitad queda aquí; el resto vuelve a la cola.
-        current.content.appendChild(halves[0]);
-        pages.push(current.page);
-        current=newPage();
-        current.content.style.width=contentW+'px';
-        current.content.style.height=contentH+'px';
-        modelContent.innerHTML='';
-        modelContent.appendChild(current.page);
-        // Las mitades restantes vuelven al pool como bloques nuevos.
-        const rest=halves.slice(1);
-        sourceBlocks.splice(i+1, 0, ...rest);
-      }
-      // Si no se pudo partir (imagen gigante), la dejamos; se mostrará
-      // recortada o ajustada al tamaño por CSS (object-fit:contain).
-    }
-  }
-  // Cierra la última página.
-  if(current.content.childNodes.length || pages.length===0){
-    pages.push(current.page);
-  }
-
-  pagesHost.removeChild(modelPage);
-
-  // Filtra páginas completamente vacías.
-  const filtered=pages.filter(p=>{
-    const c=p.querySelector('.page-content');
-    return c && (c.textContent.trim().length>0 || c.querySelector('img,svg,image'));
-  });
-  return filtered.length?filtered:[newPage().page];
-}
-
-// Intenta partir un bloque en pedazos que quepan en (contentW, contentH).
-// Devuelve un array de clones. Devuelve null si no puede partir.
-async function splitBlockToFit(block, contentW, contentH){
-  // Si es imagen, no se parte.
-  if(block.tagName==='IMG' || block.querySelector('img') && block.textContent.trim().length===0){
-    return null;
-  }
-  // Si es un contenedor con hijos, repartimos sus hijos.
-  const children=[...block.children];
-  if(children.length<2) return null;
-
-  // Contenedor de prueba fuera del DOM para medir rápido.
-  const probe=document.createElement('div');
-  probe.className='page-content';
-  probe.style.position='absolute';
-  probe.style.visibility='hidden';
-  probe.style.left='-99999px';
-  probe.style.top='0';
-  probe.style.width=contentW+'px';
-  probe.style.height=contentH+'px';
-  document.body.appendChild(probe);
-
-  const parts=[];
-  let buf=block.cloneNode(false);
-  for(const child of children){
-    const testChild=child.cloneNode(true);
-    buf.appendChild(testChild);
-    probe.innerHTML='';
-    probe.appendChild(buf.cloneNode(true));
-    if(probe.scrollHeight > contentH && buf.children.length>1){
-      // Este child no cabe: cierra buf sin él y ábrelo en uno nuevo.
-      buf.removeChild(buf.lastChild);
-      if(buf.children.length) parts.push(buf);
-      buf=block.cloneNode(false);
-      buf.appendChild(child.cloneNode(true));
-    }
-  }
-  if(buf.children.length) parts.push(buf);
-  document.body.removeChild(probe);
-  return parts.length>1 ? parts : null;
 }
 
 // ---------- Subrayados ----------
@@ -1261,7 +1353,7 @@ function applyHighlights(){
   const chHref=spine[currentIndex];
   const hs=highlights.filter(h=>h.href===chHref).sort((a,b)=>a.start-b.start);
   pageNodes.forEach(view=>{
-    const container=view.querySelector('.page-content');
+    const container=view.querySelector('.page-inner');
     if(!container) return;
     hs.forEach(h=>{
       let r=rangeFromOffsets(container, h.start, h.end);
@@ -1288,7 +1380,7 @@ function applyHighlights(){
           m.appendChild(tn);
         });
         r.insertNode(frag);
-      }catch(e){ /* rango cruzado, se ignora */ }
+      }catch(e){}
     });
   });
 }
@@ -1302,7 +1394,7 @@ function onSelectionMaybe(){
     const range=sel.getRangeAt(0);
     if(!pagesHost.contains(range.commonAncestorContainer)){ return; }
     const currentView=pageNodes[currentPage];
-    const container=currentView ? currentView.querySelector('.page-content') : null;
+    const container=currentView ? currentView.querySelector('.page-inner') : null;
     if(!container) return;
     pendingRange={
       start: nodeOffset(container, range.startContainer, range.startOffset),
