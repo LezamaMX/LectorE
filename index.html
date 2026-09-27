@@ -70,23 +70,40 @@ input[type=file]{display:none}
   min-height:0;
   background:var(--paper);
 }
-.book-viewport{
+/* Cada "página" es un div con el contenido que cabe en la pantalla. */
+.page-view{
   position:absolute; inset:0;
   overflow:hidden;
+  display:none;
 }
-.book-content{
+.page-view.active{display:block}
+.page-inner{
   height:100%;
-  column-fill: auto;
-  column-gap: 60px;
   padding: 48px 0;
+  margin: 0 auto;
+  max-width: 720px;
   font-family: var(--serif);
   line-height: 1.65;
   font-size: var(--fs, 19px);
-  will-change: transform;
-  transition: transform .3s ease;
+  overflow:hidden;
 }
-.book-content img{max-width:100%; height:auto}
-.book-content h1,.book-content h2,.book-content h3{font-family:var(--serif); line-height:1.25}
+.page-inner img{max-width:100%; height:auto; display:block; margin:0 auto}
+.page-inner h1,.page-inner h2,.page-inner h3{font-family:var(--serif); line-height:1.25}
+
+/* Portada u hojas con solo imagen: sin padding, imagen centrada */
+.page-inner.cover-page{
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.page-inner.cover-page img{
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
 
 /* --- Subrayados --- */
 mark.h-yellow{background:#F6D888 !important; color:inherit !important; padding:1px 2px; border-radius:2px;}
@@ -130,7 +147,7 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
 @media (max-width:720px){
   .side{position:fixed; z-index:5; height:100%; transform:translateX(-100%); transition:transform .2s}
   .side.open{transform:translateX(0)}
-  .book-content{padding:24px 0}
+  .page-inner{padding:24px 18px}
 }
 </style>
 </head>
@@ -179,9 +196,7 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
           <label class="upload secondary">Añadir EPUB local<input type="file" id="fileLib" accept=".epub"></label>
         </div>
       </div>
-      <div class="book-viewport" id="bookViewport" style="display:none">
-        <div class="book-content" id="bookContent"></div>
-      </div>
+      <div class="pages-host" id="pagesHost" style="display:none"></div>
     </div>
     <div class="nav-foot" id="navFoot" style="display:none">
       <div class="row">
@@ -222,7 +237,9 @@ let currentPage=0;
 let totalPages=1;
 let pageRestoreTarget=0;
 let pendingGoLastPage=false;
-let currentColumnWidth=0;
+
+// Guardamos los nodos "página" del capítulo actual
+let pageNodes=[];
 
 const $=s=>document.querySelector(s);
 const readerWrap=$('#readerWrap'), emptyEl=$('#emptyState'), tocEl=$('#toc'),
@@ -231,7 +248,7 @@ const readerWrap=$('#readerWrap'), emptyEl=$('#emptyState'), tocEl=$('#toc'),
   timeLeftEl=$('#timeLeft'), bookProgress=$('#bookProgress'), selToolbar=$('#selToolbar'),
   libraryListEl=$('#libraryList'), libActionsEl=$('#libActions'), loadingEl=$('#loading'),
   loadingTextEl=$('#loadingText'), loadingBar=$('#loadingBar'), loadingBarFill=$('#loadingBarFill'),
-  bookViewport=$('#bookViewport'), bookContent=$('#bookContent'),
+  pagesHost=$('#pagesHost'),
   pageIndicatorEl=$('#pageIndicator'), chapterProgressEl=$('#chapterProgress');
 
 document.addEventListener('visibilitychange',()=>{
@@ -307,9 +324,9 @@ const CHUNK_SIZE = 600 * 1024;
         }catch(e){ console.error('FIREBASE stats read ERROR:', e); }
 
         if(bookId) syncCurrentBookFromCloud().catch(e=>console.error('FIREBASE book sync ERROR:', e));
-        if(bookViewport.style.display==='none') loadLibrary();
+        if(pagesHost.style.display==='none') loadLibrary();
       }else{
-        if(bookViewport.style.display==='none') loadLibrary();
+        if(pagesHost.style.display==='none') loadLibrary();
       }
     });
   }catch(e){
@@ -654,7 +671,7 @@ async function loadEpub(arrayBuffer){
     pageRestoreTarget = (prog.pageIndex && prog.pageIndex>0) ? prog.pageIndex : 0;
 
     emptyEl.style.display='none';
-    bookViewport.style.display='block';
+    pagesHost.style.display='block';
     navFoot.style.display='flex';
     $('#libBtn').style.display='inline-block';
 
@@ -738,7 +755,7 @@ function goTo(i){
 function nextPage(){
   if(currentPage < totalPages-1){
     currentPage++;
-    applyPageTransform();
+    showPage(currentPage);
     pushBookState();
     updatePageUI();
   }else{
@@ -748,7 +765,7 @@ function nextPage(){
 function prevPage(){
   if(currentPage > 0){
     currentPage--;
-    applyPageTransform();
+    showPage(currentPage);
     pushBookState();
     updatePageUI();
   }else{
@@ -773,11 +790,10 @@ function finishChapterTiming(){
   activeMs=0;
 }
 
-function applyPageTransform(){
-  if(!currentColumnWidth) return;
-  const gap=60;
-  const step=currentColumnWidth + gap;
-  bookContent.style.transform='translateX(-'+(currentPage*step)+'px)';
+function showPage(i){
+  pageNodes.forEach((el,idx)=>{
+    el.classList.toggle('active', idx===i);
+  });
 }
 function updatePageUI(){
   pageIndicatorEl.textContent = 'Pág. '+(currentPage+1)+' / '+totalPages;
@@ -795,7 +811,7 @@ function repaginate(){
     pageRestoreTarget=0;
     renderChapter(currentIndex).then(()=>{
       currentPage=Math.round(frac*(totalPages-1));
-      applyPageTransform();
+      showPage(currentPage);
       updatePageUI();
     });
   }, 250);
@@ -817,7 +833,9 @@ async function renderChapter(index){
   const path=spine[index];
   const file=await findFile(path);
   if(!file){
-    bookContent.innerHTML='<p>No se pudo cargar este capítulo.</p>';
+    pagesHost.innerHTML='<div class="page-view active"><div class="page-inner"><p>No se pudo cargar este capítulo.</p></div></div>';
+    pageNodes=[pagesHost.querySelector('.page-view')];
+    totalPages=1;
     return;
   }
   let html=await file.async('string');
@@ -826,6 +844,8 @@ async function renderChapter(index){
 
   const doc=new DOMParser().parseFromString(html,'application/xhtml+xml');
   const body=doc.querySelector('body')||doc.documentElement;
+
+  // Carga imágenes a blob URLs.
   for(const img of body.querySelectorAll('img, image')){
     const attr=img.hasAttribute('src')?'src':(img.hasAttribute('xlink:href')?'xlink:href':null);
     if(!attr) continue;
@@ -836,10 +856,26 @@ async function renderChapter(index){
 
   if(thisRender!==renderSequence || renderBookId!==bookId) return;
 
-  bookContent.style.transform='translateX(0)';
-  bookContent.innerHTML=body.innerHTML;
+  // Detecta si el capítulo es una "portada" (solo imágenes, sin texto).
+  const textContent=(body.textContent||'').replace(/\s+/g,'').trim();
+  const imgs=body.querySelectorAll('img');
+  const isCover = imgs.length>0 && textContent.length<20;
 
-  await layoutColumns();
+  // Paginamos: medimos el contenido y lo troceamos.
+  const pages = await paginate(body, isCover);
+  totalPages = pages.length;
+
+  // Monta los page-view en el host.
+  pagesHost.innerHTML='';
+  pageNodes=[];
+  pages.forEach((pageEl, idx)=>{
+    const view=document.createElement('div');
+    view.className='page-view'+(idx===0?' active':'');
+    if(isCover) view.classList.add('cover-view');
+    view.appendChild(pageEl);
+    pagesHost.appendChild(view);
+    pageNodes.push(view);
+  });
 
   applyHighlights();
   renderHlist();
@@ -852,66 +888,97 @@ async function renderChapter(index){
   if(pendingGoLastPage){ target=totalPages-1; pendingGoLastPage=false; }
   pageRestoreTarget=0;
   currentPage=Math.max(0, Math.min(target, totalPages-1));
-  applyPageTransform();
+  showPage(currentPage);
 
   updateTimeEstimate();
   updatePageUI();
+}
 
-  const imgs=[...bookContent.querySelectorAll('img')];
-  if(imgs.length){
-    let pending=imgs.length;
-    imgs.forEach(img=>{
-      if(img.complete){ pending--; return; }
-      img.addEventListener('load', ()=>{
-        pending--;
-        if(pending===0) relayoutAfterImages();
-      }, {once:true});
-      img.addEventListener('error', ()=>{
-        pending--;
-        if(pending===0) relayoutAfterImages();
-      }, {once:true});
-    });
-    if(pending===0) relayoutAfterImages();
+// Trocea el contenido del capítulo en N "páginas" del tamaño del viewport.
+// Estrategia: insertamos el HTML en un contenedor de prueba con el ancho final,
+// y vamos midiendo bloque a bloque hasta que el alto supera el viewport.
+async function paginate(body, isCover){
+  // Espera a que las imágenes estén cargadas antes de medir.
+  await preloadImages(body);
+
+  // Creamos un contenedor "medidor" invisible con el ancho exacto del page-inner.
+  const measurer=document.createElement('div');
+  measurer.style.position='absolute';
+  measurer.style.left='-99999px';
+  measurer.style.top='0';
+  measurer.style.visibility='hidden';
+
+  // Calculamos el tamaño útil del page-inner (ancho y alto).
+  // Lo deducimos del viewport real para que quepa exacto.
+  const hostRect=pagesHost.getBoundingClientRect();
+  const isMobile=window.matchMedia('(max-width:720px)').matches;
+  const paddingY = isMobile ? 48 : 96;
+  const contentWidth = Math.min(720, hostRect.width);
+  const contentHeight = hostRect.height - paddingY;
+
+  measurer.style.width = contentWidth + 'px';
+  measurer.className='page-inner';
+  measurer.style.padding='0';
+  measurer.style.height='auto';
+
+  // Si es portada, una sola página con la imagen centrada.
+  if(isCover){
+    const single=document.createElement('div');
+    single.className='page-inner cover-page';
+    single.innerHTML=body.innerHTML;
+    return [single];
   }
-}
 
-// Coloca el contenido en columnas del ancho del viewport.
-// Cada "pantalla" = una columna. El viewport recorta lo que sobra.
-async function layoutColumns(){
-  await new Promise(r=>requestAnimationFrame(r));
-  const vpWidth=bookViewport.clientWidth;
-  const gap=60;
-  const sideMargin=Math.max(24, Math.min(80, Math.round(vpWidth*0.06)));
-  const contentWidth=vpWidth - sideMargin*2;
-
-  currentColumnWidth = contentWidth;
-
-  // El book-content mide exactamente el viewport; las columnas se generan
-  // dentro con el ancho pedido. El padding lateral queda DENTRO de cada columna.
-  bookContent.style.width = vpWidth + 'px';
-  bookContent.style.columnWidth = contentWidth + 'px';
-  bookContent.style.columnGap = gap + 'px';
-  bookContent.style.paddingLeft = sideMargin + 'px';
-  bookContent.style.paddingRight = '0px';
-  bookContent.style.boxSizing = 'border-box';
-
-  await new Promise(r=>requestAnimationFrame(r));
-
-  // scrollWidth incluye padding-left + N*(contentWidth) + N*gap + padding-right(0)
-  const usable = bookContent.scrollWidth - sideMargin;
-  totalPages = Math.max(1, Math.round(usable / (contentWidth + gap)));
-
-  // Ancho total del book-content = margen izq + N*(ancho col + gap).
-  bookContent.style.width = (sideMargin + totalPages*(contentWidth+gap)) + 'px';
-}
-
-function relayoutAfterImages(){
-  const frac = totalPages>1 ? currentPage/(totalPages-1) : 0;
-  layoutColumns().then(()=>{
-    currentPage=Math.round(frac*(totalPages-1));
-    applyPageTransform();
-    updatePageUI();
+  // Fragmentamos por nodos de nivel superior del body.
+  const blocks=[...body.childNodes].filter(n=>{
+    if(n.nodeType===Node.TEXT_NODE) return n.nodeValue.trim().length>0;
+    return true;
   });
+
+  const pages=[];
+  let currentPage=document.createElement('div');
+  currentPage.className='page-inner';
+  pages.push(currentPage);
+
+  // Para medir con precisión, movemos bloques a "currentPage" y verificamos
+  // su altura. Si excede el viewport, lo pasamos a la nueva página.
+  measurer.appendChild(currentPage);
+  document.body.appendChild(measurer);
+
+  for(const node of blocks){
+    const clone=node.cloneNode(true);
+    currentPage.appendChild(clone);
+
+    // Alto real del contenido acumulado.
+    if(currentPage.scrollHeight > contentHeight && currentPage.childNodes.length>1){
+      // Deshacer: mover el bloque a una nueva página.
+      currentPage.removeChild(clone);
+      currentPage=document.createElement('div');
+      currentPage.className='page-inner';
+      currentPage.appendChild(clone);
+      pages.push(currentPage);
+      measurer.appendChild(currentPage);
+    }
+  }
+
+  // Si alguna página quedó vacía, la quitamos.
+  const filtered=pages.filter(p=>p.textContent.trim().length>0 || p.querySelector('img'));
+
+  document.body.removeChild(measurer);
+  return filtered.length?filtered:[document.createElement('div')];
+}
+
+function preloadImages(root){
+  const imgs=[...root.querySelectorAll('img')];
+  if(!imgs.length) return Promise.resolve();
+  return Promise.all(imgs.map(img=>{
+    if(img.complete) return Promise.resolve();
+    return new Promise(res=>{
+      img.addEventListener('load', res, {once:true});
+      img.addEventListener('error', res, {once:true});
+      setTimeout(res, 3000); // no bloquear indefinidamente
+    });
+  }));
 }
 
 // ---------- Subrayados ----------
@@ -937,8 +1004,6 @@ function rangeFromOffsets(container, start, end){
   if(!startNode||!endNode) return null;
   const r=document.createRange(); r.setStart(startNode,startOffset); r.setEnd(endNode,endOffset); return r;
 }
-// Busca un texto concreto dentro del contenedor y devuelve el Range.
-// Se usa como fallback cuando los offsets no coinciden entre dispositivos.
 function rangeFromText(container, searchText){
   if(!searchText) return null;
   const needle=searchText.replace(/\s+/g,' ').trim();
@@ -979,45 +1044,59 @@ function rangeFromText(container, searchText){
 function applyHighlights(){
   const chHref=spine[currentIndex];
   const hs=highlights.filter(h=>h.href===chHref).sort((a,b)=>a.start-b.start);
-  hs.forEach(h=>{
-    let r=rangeFromOffsets(bookContent, h.start, h.end);
-    const rText = r ? r.toString().replace(/\s+/g,' ').trim() : '';
-    const expected = (h.text||'').replace(/\s+/g,' ').trim();
-    if(!r || (expected && rText && !rText.startsWith(expected.slice(0, Math.min(20, expected.length))))){
-      const r2=rangeFromText(bookContent, expected);
-      if(r2) r=r2;
-    }
-    if(!r) return;
-    try{
-      const frag=r.extractContents();
-      const walker=document.createTreeWalker(frag, NodeFilter.SHOW_TEXT);
-      const textNodes=[]; let n;
-      while(n=walker.nextNode()) textNodes.push(n);
-      textNodes.forEach(tn=>{
-        if(!tn.nodeValue || !tn.nodeValue.trim()) return;
-        const m=document.createElement('mark');
-        m.className='h-'+h.color+(h.comment?' has-cmt':'');
-        m.dataset.id=h.id;
-        m.onclick=()=>openHlPopup(h.id);
-        tn.parentNode.replaceChild(m, tn);
-        m.appendChild(tn);
-      });
-      r.insertNode(frag);
-    }catch(e){ console.warn('applyHighlights:', e); }
+  // Aplicamos los highlights a TODAS las páginas del capítulo (aunque solo una
+  // esté visible), porque el usuario puede navegar entre ellas.
+  pageNodes.forEach(view=>{
+    const container=view.querySelector('.page-inner');
+    if(!container) return;
+    hs.forEach(h=>{
+      // 1) por offsets dentro de esta página.
+      let r=rangeFromOffsets(container, h.start, h.end);
+      const rText=r?r.toString().replace(/\s+/g,' ').trim():'';
+      const expected=(h.text||'').replace(/\s+/g,' ').trim();
+      // 2) Si no cuadra, busca por texto (funciona entre dispositivos).
+      if(!r || (expected && rText && !rText.startsWith(expected.slice(0, Math.min(20, expected.length))))){
+        const r2=rangeFromText(container, expected);
+        if(r2) r=r2;
+      }
+      if(!r) return;
+      // Evita envolver dos veces el mismo texto.
+      if(r.startContainer.parentElement && r.startContainer.parentElement.closest('mark[data-id="'+h.id+'"]')) return;
+      try{
+        const frag=r.extractContents();
+        const walker=document.createTreeWalker(frag, NodeFilter.SHOW_TEXT);
+        const textNodes=[]; let n;
+        while(n=walker.nextNode()) textNodes.push(n);
+        textNodes.forEach(tn=>{
+          if(!tn.nodeValue || !tn.nodeValue.trim()) return;
+          const m=document.createElement('mark');
+          m.className='h-'+h.color+(h.comment?' has-cmt':'');
+          m.dataset.id=h.id;
+          m.onclick=()=>openHlPopup(h.id);
+          tn.parentNode.replaceChild(m, tn);
+          m.appendChild(tn);
+        });
+        r.insertNode(frag);
+      }catch(e){ /* rango cruzado entre páginas, se ignora en esta */ }
+    });
   });
 }
 
-bookViewport.addEventListener('mouseup', onSelectionMaybe);
-bookViewport.addEventListener('touchend', onSelectionMaybe);
+pagesHost.addEventListener('mouseup', onSelectionMaybe);
+pagesHost.addEventListener('touchend', onSelectionMaybe);
 function onSelectionMaybe(){
   setTimeout(()=>{
     const sel=window.getSelection();
     if(!sel || sel.isCollapsed || sel.rangeCount===0){ selToolbar.classList.remove('show'); return; }
     const range=sel.getRangeAt(0);
-    if(!bookViewport.contains(range.commonAncestorContainer)){ return; }
+    if(!pagesHost.contains(range.commonAncestorContainer)){ return; }
+    // Tomamos como referencia la página visible actual para calcular offsets.
+    const currentView=pageNodes[currentPage];
+    const container=currentView ? currentView.querySelector('.page-inner') : null;
+    if(!container) return;
     pendingRange={
-      start: nodeOffset(bookContent, range.startContainer, range.startOffset),
-      end: nodeOffset(bookContent, range.endContainer, range.endOffset),
+      start: nodeOffset(container, range.startContainer, range.startOffset),
+      end: nodeOffset(container, range.endContainer, range.endOffset),
       text: sel.toString().slice(0,300)
     };
     if(pendingRange.start<0||pendingRange.end<0||pendingRange.start===pendingRange.end) return;
@@ -1162,9 +1241,10 @@ function goToLibrary(){
   finishChapterTiming();
   pushBookState();
   spine=[]; zip=null; bookId=''; highlights=[]; wordCounts=[]; totalBookWords=0;
-  pageRestoreTarget=0; currentPage=0; totalPages=1; currentColumnWidth=0;
-  bookViewport.style.display='none';
-  bookContent.innerHTML='';
+  pageRestoreTarget=0; currentPage=0; totalPages=1;
+  pageNodes=[];
+  pagesHost.style.display='none';
+  pagesHost.innerHTML='';
   navFoot.style.display='none';
   $('#libBtn').style.display='none';
   $('#bookTitle').textContent='Sin libro cargado';
