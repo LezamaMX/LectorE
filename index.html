@@ -193,6 +193,12 @@ const firebaseConfig = {
 let fbAuth=null, fbDb=null, cloudUid=null, cloudReady=false, firebaseConfigured=false;
 let authReadyResolve; const authReadyPromise=new Promise(r=>authReadyResolve=r);
 
+// Evita que respuestas tardías de Firebase reemplacen un libro o una navegación
+// que el usuario ya cambió.
+let bookSessionId=0;
+let cloudSyncInFlight=0;
+let renderSequence=0;
+
 (function initFirebase(){
   if(!firebaseConfig.apiKey || firebaseConfig.apiKey.indexOf('TU_')===0){ authReadyResolve(); return; }
   try{
@@ -202,39 +208,134 @@ let authReadyResolve; const authReadyPromise=new Promise(r=>authReadyResolve=r);
     $('#signInBtn').style.display='inline-block';
     let first=true;
     fbAuth.onAuthStateChanged(async user=>{
-      cloudUid=user?user.uid:null; cloudReady=!!cloudUid;
-      $('#syncBadge').textContent = cloudReady ? 'Sincronizado en la nube ☁ ('+user.displayName+')' : '';
-      $('#signInBtn').textContent = cloudReady ? 'Cerrar sesión' : 'Iniciar sesión con Google';
-      if(cloudReady){
-        try{ const snap=await fbDb.doc('users/'+cloudUid).get(); if(snap.exists && snap.data().stats) saveJSON('epubStats', snap.data().stats); }catch(e){}
-        if(bookId && !first) await cloudBookSync();
+      cloudUid=user?user.uid:null;
+      cloudReady=!!cloudUid;
+
+      $('#syncBadge').textContent = cloudReady
+        ? 'Sincronizado en la nube ☁ ('+(user.displayName||user.email||'Cuenta')+')'
+        : '';
+
+      $('#signInBtn').textContent = cloudReady
+        ? 'Cerrar sesión'
+        : 'Iniciar sesión con Google';
+
+      // La primera resolución de auth sólo desbloquea información de usuario.
+      // El EPUB NO espera a Firebase para empezar a renderizarse.
+      if(first){
+        first=false;
+        authReadyResolve();
       }
-      if(first){ first=false; authReadyResolve(); }
+
+      if(cloudReady){
+        try{
+          const snap=await fbDb.doc('users/'+cloudUid).get();
+          if(snap.exists && snap.data().stats){
+            saveJSON('epubStats', snap.data().stats);
+          }
+        }catch(e){
+          console.error('FIREBASE stats read ERROR:', e);
+        }
+
+        // Si ya había un libro abierto, sincronizamos en segundo plano.
+        // Nunca se llama a renderChapter desde aquí directamente.
+        if(bookId) syncCurrentBookFromCloud().catch(e=>{
+          console.error('FIREBASE book sync ERROR:', e);
+        });
+      }
     });
-  }catch(e){ authReadyResolve(); }
+  }catch(e){
+    console.error('FIREBASE initialization ERROR:', e);
+    authReadyResolve();
+  }
 })();
 $('#signInBtn').onclick=()=>{
   if(!firebaseConfigured) return;
   if(cloudReady){ fbAuth.signOut(); return; }
-  fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e=>alert('No se pudo iniciar sesión: '+e.message));
+  fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e=>{
+    console.error('FIREBASE signIn ERROR:', e);
+    if(e && e.code!=='auth/popup-closed-by-user'){
+      alert('No se pudo iniciar sesión: '+(e.message||e.code||e));
+    }
+  });
 };
 function pushStats(){ if(!cloudReady) return; try{ fbDb.doc('users/'+cloudUid).set({stats:getStats()}, {merge:true}).catch(()=>{}); }catch(e){} }
 function pushBookState(){
   if(!cloudReady || !bookId) return;
-  try{ fbDb.doc('users/'+cloudUid+'/books/'+bookId).set({ currentIndex, highlights, updatedAt: Date.now() }).catch(()=>{}); }catch(e){}
+
+  const syncBookId=bookId;
+  const syncUid=cloudUid;
+  const data={
+    currentIndex,
+    highlights,
+    updatedAt: Date.now()
+  };
+
+  try{
+    fbDb.doc('users/'+syncUid+'/books/'+syncBookId)
+      .set(data, {merge:true})
+      .catch(e=>console.error('FIREBASE pushBookState ERROR:', e));
+  }catch(e){
+    console.error('FIREBASE pushBookState ERROR:', e);
+  }
 }
-async function pullBookState(){
-  if(!cloudReady || !bookId) return null;
-  try{ const snap=await fbDb.doc('users/'+cloudUid+'/books/'+bookId).get(); return snap.exists?snap.data():null; }catch(e){ return null; }
+
+async function pullBookState(bookIdOverride=bookId, uidOverride=cloudUid){
+  if(!cloudReady || !bookIdOverride || !uidOverride) return null;
+
+  try{
+    const snap=await fbDb.doc('users/'+uidOverride+'/books/'+bookIdOverride).get();
+    return snap.exists?snap.data():null;
+  }catch(e){
+    console.error('FIREBASE pullBookState ERROR:', e);
+    return null;
+  }
 }
-async function cloudBookSync(){
-  const remote=await pullBookState();
+
+// Firebase sincroniza DESPUÉS de que el EPUB ya está visible.
+// Si el usuario cambia de libro o capítulo mientras esperamos la red,
+// la respuesta atrasada no debe destruir su estado actual.
+async function syncCurrentBookFromCloud(){
+  if(!cloudReady || !bookId || !spine.length) return;
+
+  const syncId=++cloudSyncInFlight;
+  const syncBookId=bookId;
+  const syncUid=cloudUid;
+  const syncSession=bookSessionId;
+  const syncIndex=currentIndex;
+
+  const remote=await pullBookState(syncBookId, syncUid);
+
+  if(syncId!==cloudSyncInFlight) return;
+  if(syncBookId!==bookId || syncUid!==cloudUid) return;
+  if(syncSession!==bookSessionId) return;
+
   if(remote){
-    highlights=remote.highlights||[]; saveJSON('epubHl_'+bookId, highlights);
-    const idx=typeof remote.currentIndex==='number'?remote.currentIndex:0;
-    saveJSON('epubProg_'+bookId, {index: idx});
-    await renderChapter(idx);
-  } else { pushBookState(); }
+    const remoteHighlights=Array.isArray(remote.highlights)
+      ? remote.highlights
+      : [];
+
+    const remoteIndex=typeof remote.currentIndex==='number'
+      ? Math.max(0, Math.min(remote.currentIndex, spine.length-1))
+      : 0;
+
+    // Si el usuario ya navegó mientras Firebase respondía, respetamos
+    // su navegación y no la sustituimos por el índice remoto.
+    const userNavigated=(currentIndex!==syncIndex);
+
+    highlights=remoteHighlights;
+    saveJSON('epubHl_'+bookId, highlights);
+
+    if(!userNavigated){
+      saveJSON('epubProg_'+bookId, {index: remoteIndex});
+      await renderChapter(remoteIndex);
+    }else{
+      renderHlist();
+      applyHighlights();
+    }
+  }else{
+    // No existe estado remoto: creamos uno sin bloquear la lectura.
+    pushBookState();
+  }
 }
 
 // ---------- theme / font / columns ----------
@@ -319,22 +420,47 @@ async function loadEpub(arrayBuffer){
   if(tocItems.length===0) tocItems=spine.map((h,i)=>({label:'Capítulo '+(i+1), href:h}));
 
   buildTocUI();
-  await authReadyPromise;
-  let remote=null;
-  if(cloudReady) remote=await pullBookState();
-  if(remote){
-    highlights=remote.highlights||[];
-    saveJSON('epubHl_'+bookId, highlights);
-    saveJSON('epubProg_'+bookId, {index: typeof remote.currentIndex==='number'?remote.currentIndex:0});
-  } else {
-    highlights=loadJSON('epubHl_'+bookId, []);
-    if(cloudReady) pushBookState();
-  }
+
+  // Cada apertura de EPUB crea una nueva sesión. Esto permite ignorar
+  // respuestas tardías de Firebase pertenecientes al libro anterior.
+  const thisSession=++bookSessionId;
+
+  // PRIMERO: abrir el EPUB usando únicamente el archivo local.
+  // Firebase nunca debe impedir que el usuario empiece a leer.
+  highlights=loadJSON('epubHl_'+bookId, []);
+
   const prog=loadJSON('epubProg_'+bookId, {index:0});
-  emptyEl.style.display='none'; readerEl.style.display='block'; navFoot.style.display='flex';
+
+  emptyEl.style.display='none';
+  readerEl.style.display='block';
+  navFoot.style.display='flex';
+
   applyFont();
+
   await renderChapter(prog.index||0);
   computeWordCounts();
+
+  // SEGUNDO: sincronizar con Firebase en segundo plano.
+  // Esperamos a que Auth termine sólo si todavía no sabemos si hay usuario.
+  if(cloudReady){
+    if(thisSession===bookSessionId){
+      syncCurrentBookFromCloud().catch(e=>{
+        console.error('FIREBASE background sync ERROR:', e);
+      });
+    }
+  }else if(firebaseConfigured){
+    authReadyPromise.then(()=>{
+      if(
+        cloudReady &&
+        thisSession===bookSessionId &&
+        bookId
+      ){
+        syncCurrentBookFromCloud().catch(e=>{
+          console.error('FIREBASE delayed sync ERROR:', e);
+        });
+      }
+    });
+  }
 }
 
 function buildTocUI(){
@@ -370,7 +496,14 @@ function updateTimeEstimate(){
 }
 readerWrap.addEventListener('scroll', ()=>{ updateTimeEstimate(); }, {passive:true});
 
-function goTo(i){ finishChapterTiming(); renderChapter(i); }
+function goTo(i){
+  if(i<0 || i>=spine.length) return;
+  finishChapterTiming();
+  renderChapter(i).catch(e=>{
+    console.error('Error renderizando capítulo:', e);
+    readerEl.innerHTML='<p>No se pudo cargar este capítulo.</p>';
+  });
+}
 prevBtn.onclick=()=>goTo(currentIndex-1);
 nextBtn.onclick=()=>goTo(currentIndex+1);
 document.addEventListener('keydown', e=>{ if(e.key==='ArrowRight') goTo(currentIndex+1); if(e.key==='ArrowLeft') goTo(currentIndex-1); });
@@ -384,13 +517,27 @@ function finishChapterTiming(){
 
 async function renderChapter(index){
   if(index<0||index>=spine.length) return;
-  currentIndex=index; chapterStart=Date.now(); activeMs=0;
-  saveJSON('epubProg_'+bookId, {index});
+
+  const thisRender=++renderSequence;
+
+  currentIndex=index;
+  chapterStart=Date.now();
+  activeMs=0;
+
+  const renderBookId=bookId;
+
+  saveJSON('epubProg_'+renderBookId, {index});
+
+  // La escritura a Firebase es asíncrona y no bloquea la renderización.
   pushBookState();
+
   const path=spine[index];
   const file=await findFile(path);
   if(!file){ readerEl.innerHTML='<p>No se pudo cargar este capítulo.</p>'; return; }
   let html=await file.async('string');
+
+  if(thisRender!==renderSequence || renderBookId!==bookId) return;
+
   const doc=new DOMParser().parseFromString(html,'application/xhtml+xml');
   const body=doc.querySelector('body')||doc.documentElement;
   for(const img of body.querySelectorAll('img, image')){
@@ -400,8 +547,12 @@ async function renderChapter(index){
     const imgFile=await findFile(resolvePath(path, rel));
     if(imgFile){ const blob=await imgFile.async('blob'); img.setAttribute(attr, URL.createObjectURL(blob)); }
   }
+
+  if(thisRender!==renderSequence || renderBookId!==bookId) return;
+
   readerEl.innerHTML=body.innerHTML;
-  readerWrap.scrollTop=0; readerWrap.scrollLeft=0;
+  readerWrap.scrollTop=0;
+  readerWrap.scrollLeft=0;
 
   applyHighlights();
   renderHlist();
@@ -578,9 +729,20 @@ $('#expPdf').onclick=exportPdf;
 $('#expDocx').onclick=exportDocx;
 
 $('#file').addEventListener('change', async (e)=>{
-  const f=e.target.files[0]; if(!f) return;
-  try{ const buf=await f.arrayBuffer(); await loadEpub(buf); }
-  catch(err){ emptyEl.querySelector('.big').textContent='No se pudo leer este archivo. ¿Seguro que es un .epub válido?'; console.error(err); }
+  const f=e.target.files[0];
+  if(!f) return;
+
+  // Invalida cualquier render/sync pendiente del libro anterior.
+  bookSessionId++;
+  renderSequence++;
+
+  try{
+    const buf=await f.arrayBuffer();
+    await loadEpub(buf);
+  }catch(err){
+    emptyEl.querySelector('.big').textContent='No se pudo leer este archivo. ¿Seguro que es un .epub válido?';
+    console.error('EPUB load ERROR:', err);
+  }
 });
 </script>
 </body>
