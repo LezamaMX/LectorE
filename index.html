@@ -62,7 +62,7 @@ input[type=file]{display:none}
 .bookbar{height:3px; background:var(--line); position:relative; flex-shrink:0;}
 .bookbar i{position:absolute; left:0; top:0; height:100%; background:var(--accent); width:0%; transition:width .3s}
 
-/* -------- Visor paginado -------- */
+/* -------- Visor paginado con columnas + scroll horizontal -------- */
 .reader-wrap{
   flex:1;
   position:relative;
@@ -70,39 +70,46 @@ input[type=file]{display:none}
   min-height:0;
   background:var(--paper);
 }
-/* Cada "página" es un div con el contenido que cabe en la pantalla. */
-.page-view{
+.book-scroll{
   position:absolute; inset:0;
-  overflow:hidden;
-  display:none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  /* Oculta scrollbar pero mantiene funcionalidad */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
-.page-view.active{display:block}
-.page-inner{
-  height:100%;
-  padding: 48px 0;
-  margin: 0 auto;
-  max-width: 720px;
+.book-scroll::-webkit-scrollbar{display:none}
+.book-content{
+  height: 100%;
+  column-fill: auto;
+  column-gap: 60px;
+  padding: 40px 0;
   font-family: var(--serif);
   line-height: 1.65;
   font-size: var(--fs, 19px);
-  overflow:hidden;
+  box-sizing: border-box;
 }
-.page-inner img{max-width:100%; height:auto; display:block; margin:0 auto}
-.page-inner h1,.page-inner h2,.page-inner h3{font-family:var(--serif); line-height:1.25}
+.book-content img{max-width:100%; height:auto; display:block; margin:8px auto}
+.book-content h1,.book-content h2,.book-content h3{font-family:var(--serif); line-height:1.25}
+.book-content p{margin:0 0 1em}
 
-/* Portada u hojas con solo imagen: sin padding, imagen centrada */
-.page-inner.cover-page{
-  padding: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* Modo "single-image" (portada o imágenes solas): sin columnas, centrado */
+.book-content.single-image{
+  column-width: auto;
+  column-gap: 0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding: 20px;
 }
-.page-inner.cover-page img{
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
-  object-fit: contain;
+.book-content.single-image img{
+  max-width:100%;
+  max-height:100%;
+  width:auto;
+  height:auto;
+  object-fit:contain;
+  margin:auto;
 }
 
 /* --- Subrayados --- */
@@ -119,7 +126,8 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
 .library{width:100%; max-width:760px; display:flex; flex-direction:column; gap:10px; padding:8px 0 24px;}
 .lib-card{display:flex; gap:12px; padding:12px 14px; border-radius:10px; background:var(--panel); border:1px solid var(--line); cursor:pointer; text-align:left; align-items:center;}
 .lib-card:hover{border-color:var(--accent)}
-.lib-card .cover{width:48px; height:64px; flex-shrink:0; border-radius:6px; background:linear-gradient(160deg, var(--accent), var(--ink-soft)); display:flex; align-items:center; justify-content:center; color:var(--paper); font-family:var(--serif); font-size:22px; font-weight:600;}
+.lib-card .cover{width:56px; height:76px; flex-shrink:0; border-radius:6px; overflow:hidden; background:linear-gradient(160deg, var(--accent), var(--ink-soft)); display:flex; align-items:center; justify-content:center; color:var(--paper); font-family:var(--serif); font-size:22px; font-weight:600;}
+.lib-card .cover img{width:100%; height:100%; object-fit:cover; display:block;}
 .lib-card .info{flex:1; min-width:0;}
 .lib-card .info h3{margin:0 0 3px; font-family:var(--serif); font-size:16px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .lib-card .info p{margin:0; font-size:12.5px; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
@@ -147,7 +155,8 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
 @media (max-width:720px){
   .side{position:fixed; z-index:5; height:100%; transform:translateX(-100%); transition:transform .2s}
   .side.open{transform:translateX(0)}
-  .page-inner{padding:24px 18px}
+  .book-content{padding:24px 0; column-gap: 40px;}
+  .lib-card .cover{width:48px; height:66px;}
 }
 </style>
 </head>
@@ -196,7 +205,9 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
           <label class="upload secondary">Añadir EPUB local<input type="file" id="fileLib" accept=".epub"></label>
         </div>
       </div>
-      <div class="pages-host" id="pagesHost" style="display:none"></div>
+      <div class="book-scroll" id="bookScroll" style="display:none">
+        <div class="book-content" id="bookContent"></div>
+      </div>
     </div>
     <div class="nav-foot" id="navFoot" style="display:none">
       <div class="row">
@@ -231,15 +242,15 @@ const fontSizes=[16,17,18,19,21,23,25]; let fontIdx=3;
 let spine=[], zip=null, opfDir='', currentIndex=0, tocItems=[];
 let bookId='', highlights=[], wordCounts=[], totalBookWords=0, pendingRange=null;
 let chapterStart=0, activeMs=0, hidden=false;
+let bookCoverDataUrl=''; // miniatura de portada para la biblioteca
 
-// Paginación
+// Paginación con columnas + scrollLeft
 let currentPage=0;
 let totalPages=1;
 let pageRestoreTarget=0;
 let pendingGoLastPage=false;
-
-// Guardamos los nodos "página" del capítulo actual
-let pageNodes=[];
+let pageWidth=0; // ancho de UNA página (columna + gap)
+let isSingleImageChapter=false;
 
 const $=s=>document.querySelector(s);
 const readerWrap=$('#readerWrap'), emptyEl=$('#emptyState'), tocEl=$('#toc'),
@@ -248,7 +259,7 @@ const readerWrap=$('#readerWrap'), emptyEl=$('#emptyState'), tocEl=$('#toc'),
   timeLeftEl=$('#timeLeft'), bookProgress=$('#bookProgress'), selToolbar=$('#selToolbar'),
   libraryListEl=$('#libraryList'), libActionsEl=$('#libActions'), loadingEl=$('#loading'),
   loadingTextEl=$('#loadingText'), loadingBar=$('#loadingBar'), loadingBarFill=$('#loadingBarFill'),
-  pagesHost=$('#pagesHost'),
+  bookScroll=$('#bookScroll'), bookContent=$('#bookContent'),
   pageIndicatorEl=$('#pageIndicator'), chapterProgressEl=$('#chapterProgress');
 
 document.addEventListener('visibilitychange',()=>{
@@ -291,6 +302,7 @@ let cloudSyncInFlight=0;
 let renderSequence=0;
 
 const CHUNK_SIZE = 600 * 1024;
+const MAX_COVER_BYTES = 200 * 1024; // 200 KB para guardar portada en Firestore
 
 (function initFirebase(){
   if(!firebaseConfig.apiKey || firebaseConfig.apiKey.indexOf('TU_')===0){ authReadyResolve(); return; }
@@ -324,9 +336,9 @@ const CHUNK_SIZE = 600 * 1024;
         }catch(e){ console.error('FIREBASE stats read ERROR:', e); }
 
         if(bookId) syncCurrentBookFromCloud().catch(e=>console.error('FIREBASE book sync ERROR:', e));
-        if(pagesHost.style.display==='none') loadLibrary();
+        if(bookScroll.style.display==='none') loadLibrary();
       }else{
-        if(pagesHost.style.display==='none') loadLibrary();
+        if(bookScroll.style.display==='none') loadLibrary();
       }
     });
   }catch(e){
@@ -434,7 +446,8 @@ async function uploadBookToCloud(buf, meta){
   if(existing.exists && existing.data().chunks){
     await docRef.set({
       title: meta.title, author: meta.author,
-      totalChapters: meta.totalChapters||0
+      totalChapters: meta.totalChapters||0,
+      cover: meta.cover||''
     }, {merge:true});
     return;
   }
@@ -452,7 +465,8 @@ async function uploadBookToCloud(buf, meta){
     addedAt: Date.now(),
     currentIndex: 0,
     highlights: [],
-    pageIndex: 0
+    pageIndex: 0,
+    cover: meta.cover||''
   }, {merge:true});
 
   const chunksCol=docRef.collection('chunks');
@@ -535,8 +549,11 @@ function renderLibrary(list){
     const total=b.totalChapters||0;
     const idx=typeof b.currentIndex==='number'?b.currentIndex:0;
     const pct = total>0 ? Math.round((idx+1)/total*100) : 0;
+    const coverHtml = b.cover
+      ? '<div class="cover"><img src="'+b.cover+'" alt=""></div>'
+      : '<div class="cover">'+escapeHtml(initial)+'</div>';
     card.innerHTML=
-      '<div class="cover">'+escapeHtml(initial)+'</div>'+
+      coverHtml+
       '<div class="info">'+
         '<h3>'+escapeHtml(b.title||'Sin título')+'</h3>'+
         '<p>'+escapeHtml(b.author||'')+'</p>'+
@@ -616,6 +633,86 @@ function plainText(html){
 }
 function wordCount(txt){ return txt ? txt.split(' ').filter(Boolean).length : 0; }
 
+// Extrae la portada del EPUB: prioriza metadata (cover-image) o, si no,
+// la primera imagen del primer capítulo del spine.
+async function extractCover(opfDoc, manifest){
+  // 1) EPUB3: <meta name="cover" content="id"> o item con properties="cover-image"
+  try{
+    const metaCover=opfDoc.querySelector('metadata > meta[name="cover"]');
+    let coverId=metaCover?metaCover.getAttribute('content'):null;
+    if(!coverId){
+      const item=opfDoc.querySelector('manifest > item[properties~="cover-image"]');
+      if(item) coverId=item.getAttribute('id');
+    }
+    if(coverId && manifest[coverId]){
+      const f=await findFile(manifest[coverId].href);
+      if(f){
+        const blob=await f.async('blob');
+        const dataUrl=await blobToDataURL(blob, MAX_COVER_BYTES);
+        if(dataUrl) return dataUrl;
+      }
+    }
+  }catch(e){ console.warn('cover meta:', e); }
+
+  // 2) Primera imagen del primer capítulo del spine
+  try{
+    if(spine.length){
+      const f=await findFile(spine[0]);
+      if(f){
+        const html=await f.async('string');
+        const doc=new DOMParser().parseFromString(html,'application/xhtml+xml');
+        const img=doc.querySelector('img, image');
+        if(img){
+          const attr=img.hasAttribute('src')?'src':(img.hasAttribute('xlink:href')?'xlink:href':null);
+          const rel=attr?img.getAttribute(attr):null;
+          if(rel){
+            const imgPath=resolvePath(spine[0], rel);
+            const imgFile=await findFile(imgPath);
+            if(imgFile){
+              const blob=await imgFile.async('blob');
+              const dataUrl=await blobToDataURL(blob, MAX_COVER_BYTES);
+              if(dataUrl) return dataUrl;
+            }
+          }
+        }
+      }
+    }
+  }catch(e){ console.warn('cover first chapter:', e); }
+
+  return '';
+}
+
+// Convierte un Blob a dataURL JPEG reducido, para que quepa en Firestore.
+function blobToDataURL(blob, maxBytes){
+  return new Promise(resolve=>{
+    const reader=new FileReader();
+    reader.onload=()=>{
+      const dataUrl=reader.result;
+      // Si ya es pequeño, devuélvelo tal cual.
+      if(dataUrl.length < maxBytes*1.37){ resolve(dataUrl); return; }
+      // Si no, redimensiona con canvas.
+      const img=new Image();
+      img.onload=()=>{
+        const maxW=300, maxH=400;
+        let w=img.width, h=img.height;
+        const ratio=Math.min(maxW/w, maxH/h, 1);
+        w=Math.round(w*ratio); h=Math.round(h*ratio);
+        const canvas=document.createElement('canvas');
+        canvas.width=w; canvas.height=h;
+        const ctx=canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        try{
+          resolve(canvas.toDataURL('image/jpeg', 0.8));
+        }catch(e){ resolve(dataUrl); }
+      };
+      img.onerror=()=>resolve(dataUrl);
+      img.src=dataUrl;
+    };
+    reader.onerror=()=>resolve('');
+    reader.readAsDataURL(blob);
+  });
+}
+
 async function loadEpub(arrayBuffer){
   showLoading('Abriendo EPUB…', false);
   try{
@@ -666,12 +763,15 @@ async function loadEpub(arrayBuffer){
 
     const thisSession=++bookSessionId;
 
+    // Extrae portada para miniatura de biblioteca.
+    bookCoverDataUrl=await extractCover(opfDoc, manifest);
+
     highlights=loadJSON('epubHl_'+bookId, []);
     const prog=loadJSON('epubProg_'+bookId, {index:0, pageIndex:0});
     pageRestoreTarget = (prog.pageIndex && prog.pageIndex>0) ? prog.pageIndex : 0;
 
     emptyEl.style.display='none';
-    pagesHost.style.display='block';
+    bookScroll.style.display='block';
     navFoot.style.display='flex';
     $('#libBtn').style.display='inline-block';
 
@@ -683,13 +783,13 @@ async function loadEpub(arrayBuffer){
 
     if(cloudReady){
       uploadBookToCloud(arrayBuffer, {
-        bookId, title, author, totalChapters: spine.length
+        bookId, title, author, totalChapters: spine.length, cover: bookCoverDataUrl
       }).catch(e=>console.error('uploadBookToCloud ERROR:', e));
     }else if(firebaseConfigured){
       authReadyPromise.then(()=>{
         if(cloudReady && bookId){
           uploadBookToCloud(arrayBuffer, {
-            bookId, title, author, totalChapters: spine.length
+            bookId, title, author, totalChapters: spine.length, cover: bookCoverDataUrl
           }).catch(e=>console.error('uploadBookToCloud delayed ERROR:', e));
         }
       });
@@ -755,7 +855,7 @@ function goTo(i){
 function nextPage(){
   if(currentPage < totalPages-1){
     currentPage++;
-    showPage(currentPage);
+    scrollToPage(currentPage);
     pushBookState();
     updatePageUI();
   }else{
@@ -765,7 +865,7 @@ function nextPage(){
 function prevPage(){
   if(currentPage > 0){
     currentPage--;
-    showPage(currentPage);
+    scrollToPage(currentPage);
     pushBookState();
     updatePageUI();
   }else{
@@ -790,11 +890,24 @@ function finishChapterTiming(){
   activeMs=0;
 }
 
-function showPage(i){
-  pageNodes.forEach((el,idx)=>{
-    el.classList.toggle('active', idx===i);
-  });
+function scrollToPage(i){
+  bookScroll.scrollLeft = i * pageWidth;
 }
+function onScrollBook(){
+  // Detecta la página actual al hacer scroll (por si el usuario usa gestos).
+  if(!pageWidth) return;
+  const p=Math.round(bookScroll.scrollLeft / pageWidth);
+  if(p!==currentPage && p>=0 && p<totalPages){
+    currentPage=p;
+    pushBookState();
+    updatePageUI();
+  }
+}
+bookScroll.addEventListener('scroll', ()=>{
+  clearTimeout(bookScroll._t);
+  bookScroll._t=setTimeout(onScrollBook, 80);
+}, {passive:true});
+
 function updatePageUI(){
   pageIndicatorEl.textContent = 'Pág. '+(currentPage+1)+' / '+totalPages;
   chapterProgressEl.textContent = 'Cap. '+(currentIndex+1)+' / '+spine.length;
@@ -811,7 +924,7 @@ function repaginate(){
     pageRestoreTarget=0;
     renderChapter(currentIndex).then(()=>{
       currentPage=Math.round(frac*(totalPages-1));
-      showPage(currentPage);
+      scrollToPage(currentPage);
       updatePageUI();
     });
   }, 250);
@@ -833,9 +946,7 @@ async function renderChapter(index){
   const path=spine[index];
   const file=await findFile(path);
   if(!file){
-    pagesHost.innerHTML='<div class="page-view active"><div class="page-inner"><p>No se pudo cargar este capítulo.</p></div></div>';
-    pageNodes=[pagesHost.querySelector('.page-view')];
-    totalPages=1;
+    bookContent.innerHTML='<p>No se pudo cargar este capítulo.</p>';
     return;
   }
   let html=await file.async('string');
@@ -845,7 +956,7 @@ async function renderChapter(index){
   const doc=new DOMParser().parseFromString(html,'application/xhtml+xml');
   const body=doc.querySelector('body')||doc.documentElement;
 
-  // Carga imágenes a blob URLs.
+  // Convierte imágenes a blob URLs para que se vean.
   for(const img of body.querySelectorAll('img, image')){
     const attr=img.hasAttribute('src')?'src':(img.hasAttribute('xlink:href')?'xlink:href':null);
     if(!attr) continue;
@@ -856,27 +967,31 @@ async function renderChapter(index){
 
   if(thisRender!==renderSequence || renderBookId!==bookId) return;
 
-  // Detecta si el capítulo es una "portada" (solo imágenes, sin texto).
+  // Detección "solo imagen": capítulos como portada (una sola imagen, poco texto).
   const textContent=(body.textContent||'').replace(/\s+/g,'').trim();
   const imgs=body.querySelectorAll('img');
-  const isCover = imgs.length>0 && textContent.length<20;
+  const onlyImage = imgs.length>0 && textContent.length<20;
 
-  // Paginamos: medimos el contenido y lo troceamos.
-  const pages = await paginate(body, isCover);
-  totalPages = pages.length;
+  bookContent.classList.toggle('single-image', onlyImage);
+  bookContent.innerHTML=body.innerHTML;
 
-  // Monta los page-view en el host.
-  pagesHost.innerHTML='';
-  pageNodes=[];
-  pages.forEach((pageEl, idx)=>{
-    const view=document.createElement('div');
-    view.className='page-view'+(idx===0?' active':'');
-    if(isCover) view.classList.add('cover-view');
-    view.appendChild(pageEl);
-    pagesHost.appendChild(view);
-    pageNodes.push(view);
-  });
+  // Esperar imágenes cargadas antes de medir.
+  await preloadImages(bookContent);
 
+  if(thisRender!==renderSequence || renderBookId!==bookId) return;
+
+  if(onlyImage){
+    // Una sola página, sin columnas.
+    isSingleImageChapter=true;
+    pageWidth = bookScroll.clientWidth; // no hay siguiente
+    totalPages=1;
+    bookScroll.scrollLeft=0;
+  }else{
+    isSingleImageChapter=false;
+    await setupColumns();
+  }
+
+  // Aplica subrayados y lista.
   applyHighlights();
   renderHlist();
 
@@ -888,95 +1003,58 @@ async function renderChapter(index){
   if(pendingGoLastPage){ target=totalPages-1; pendingGoLastPage=false; }
   pageRestoreTarget=0;
   currentPage=Math.max(0, Math.min(target, totalPages-1));
-  showPage(currentPage);
+  scrollToPage(currentPage);
 
   updateTimeEstimate();
   updatePageUI();
 }
 
-// Trocea el contenido del capítulo en N "páginas" del tamaño del viewport.
-// Estrategia: insertamos el HTML en un contenedor de prueba con el ancho final,
-// y vamos midiendo bloque a bloque hasta que el alto supera el viewport.
-async function paginate(body, isCover){
-  // Espera a que las imágenes estén cargadas antes de medir.
-  await preloadImages(body);
+// Coloca columnas y calcula cuántas páginas hay.
+async function setupColumns(){
+  await new Promise(r=>requestAnimationFrame(r));
+  const vpW=bookScroll.clientWidth;
+  const gap=window.matchMedia('(max-width:720px)').matches ? 40 : 60;
+  const sideMargin=Math.max(24, Math.min(80, Math.round(vpW*0.06)));
+  const colW=vpW - sideMargin*2;
 
-  // Creamos un contenedor "medidor" invisible con el ancho exacto del page-inner.
-  const measurer=document.createElement('div');
-  measurer.style.position='absolute';
-  measurer.style.left='-99999px';
-  measurer.style.top='0';
-  measurer.style.visibility='hidden';
+  // El book-content ocupa el ancho visible completo. Las columnas se generan
+  // con el ancho colW. El navegador reparte el contenido automáticamente.
+  bookContent.style.width = vpW + 'px';
+  bookContent.style.columnWidth = colW + 'px';
+  bookContent.style.columnGap = gap + 'px';
+  bookContent.style.paddingLeft = sideMargin + 'px';
+  bookContent.style.paddingRight = '0px';
 
-  // Calculamos el tamaño útil del page-inner (ancho y alto).
-  // Lo deducimos del viewport real para que quepa exacto.
-  const hostRect=pagesHost.getBoundingClientRect();
-  const isMobile=window.matchMedia('(max-width:720px)').matches;
-  const paddingY = isMobile ? 48 : 96;
-  const contentWidth = Math.min(720, hostRect.width);
-  const contentHeight = hostRect.height - paddingY;
+  // El "paso" real de una columna a la siguiente es colW + gap. Pero como hay
+  // paddingLeft dentro de la primera columna, la primera página está desplazada.
+  // Para que scrollLeft funcione limpio, el ancho total debe ser:
+  // paddingLeft + N*colW + (N-1)*gap
+  // Esperamos un frame para que el navegador reparta.
+  await new Promise(r=>requestAnimationFrame(r));
 
-  measurer.style.width = contentWidth + 'px';
-  measurer.className='page-inner';
-  measurer.style.padding='0';
-  measurer.style.height='auto';
+  const totalWidth = bookContent.scrollWidth;
+  // Descontando paddingLeft: cuántas columnas hay
+  const usable = totalWidth - sideMargin;
+  const N = Math.max(1, Math.round((usable + gap) / (colW + gap)));
+  totalPages = N;
 
-  // Si es portada, una sola página con la imagen centrada.
-  if(isCover){
-    const single=document.createElement('div');
-    single.className='page-inner cover-page';
-    single.innerHTML=body.innerHTML;
-    return [single];
-  }
+  // Fijamos el ancho total exacto para que scrollLeft = i * (colW+gap) muestre
+  // la columna i perfectamente alineada.
+  bookContent.style.width = (sideMargin + N*colW + (N-1)*gap) + 'px';
 
-  // Fragmentamos por nodos de nivel superior del body.
-  const blocks=[...body.childNodes].filter(n=>{
-    if(n.nodeType===Node.TEXT_NODE) return n.nodeValue.trim().length>0;
-    return true;
-  });
-
-  const pages=[];
-  let currentPage=document.createElement('div');
-  currentPage.className='page-inner';
-  pages.push(currentPage);
-
-  // Para medir con precisión, movemos bloques a "currentPage" y verificamos
-  // su altura. Si excede el viewport, lo pasamos a la nueva página.
-  measurer.appendChild(currentPage);
-  document.body.appendChild(measurer);
-
-  for(const node of blocks){
-    const clone=node.cloneNode(true);
-    currentPage.appendChild(clone);
-
-    // Alto real del contenido acumulado.
-    if(currentPage.scrollHeight > contentHeight && currentPage.childNodes.length>1){
-      // Deshacer: mover el bloque a una nueva página.
-      currentPage.removeChild(clone);
-      currentPage=document.createElement('div');
-      currentPage.className='page-inner';
-      currentPage.appendChild(clone);
-      pages.push(currentPage);
-      measurer.appendChild(currentPage);
-    }
-  }
-
-  // Si alguna página quedó vacía, la quitamos.
-  const filtered=pages.filter(p=>p.textContent.trim().length>0 || p.querySelector('img'));
-
-  document.body.removeChild(measurer);
-  return filtered.length?filtered:[document.createElement('div')];
+  pageWidth = colW + gap;
+  bookScroll.scrollLeft = 0;
 }
 
 function preloadImages(root){
   const imgs=[...root.querySelectorAll('img')];
   if(!imgs.length) return Promise.resolve();
   return Promise.all(imgs.map(img=>{
-    if(img.complete) return Promise.resolve();
+    if(img.complete && img.naturalWidth>0) return Promise.resolve();
     return new Promise(res=>{
       img.addEventListener('load', res, {once:true});
       img.addEventListener('error', res, {once:true});
-      setTimeout(res, 3000); // no bloquear indefinidamente
+      setTimeout(res, 3000);
     });
   }));
 }
@@ -1044,59 +1122,45 @@ function rangeFromText(container, searchText){
 function applyHighlights(){
   const chHref=spine[currentIndex];
   const hs=highlights.filter(h=>h.href===chHref).sort((a,b)=>a.start-b.start);
-  // Aplicamos los highlights a TODAS las páginas del capítulo (aunque solo una
-  // esté visible), porque el usuario puede navegar entre ellas.
-  pageNodes.forEach(view=>{
-    const container=view.querySelector('.page-inner');
-    if(!container) return;
-    hs.forEach(h=>{
-      // 1) por offsets dentro de esta página.
-      let r=rangeFromOffsets(container, h.start, h.end);
-      const rText=r?r.toString().replace(/\s+/g,' ').trim():'';
-      const expected=(h.text||'').replace(/\s+/g,' ').trim();
-      // 2) Si no cuadra, busca por texto (funciona entre dispositivos).
-      if(!r || (expected && rText && !rText.startsWith(expected.slice(0, Math.min(20, expected.length))))){
-        const r2=rangeFromText(container, expected);
-        if(r2) r=r2;
-      }
-      if(!r) return;
-      // Evita envolver dos veces el mismo texto.
-      if(r.startContainer.parentElement && r.startContainer.parentElement.closest('mark[data-id="'+h.id+'"]')) return;
-      try{
-        const frag=r.extractContents();
-        const walker=document.createTreeWalker(frag, NodeFilter.SHOW_TEXT);
-        const textNodes=[]; let n;
-        while(n=walker.nextNode()) textNodes.push(n);
-        textNodes.forEach(tn=>{
-          if(!tn.nodeValue || !tn.nodeValue.trim()) return;
-          const m=document.createElement('mark');
-          m.className='h-'+h.color+(h.comment?' has-cmt':'');
-          m.dataset.id=h.id;
-          m.onclick=()=>openHlPopup(h.id);
-          tn.parentNode.replaceChild(m, tn);
-          m.appendChild(tn);
-        });
-        r.insertNode(frag);
-      }catch(e){ /* rango cruzado entre páginas, se ignora en esta */ }
-    });
+  hs.forEach(h=>{
+    let r=rangeFromOffsets(bookContent, h.start, h.end);
+    const rText=r?r.toString().replace(/\s+/g,' ').trim():'';
+    const expected=(h.text||'').replace(/\s+/g,' ').trim();
+    if(!r || (expected && rText && !rText.startsWith(expected.slice(0, Math.min(20, expected.length))))){
+      const r2=rangeFromText(bookContent, expected);
+      if(r2) r=r2;
+    }
+    if(!r) return;
+    try{
+      const frag=r.extractContents();
+      const walker=document.createTreeWalker(frag, NodeFilter.SHOW_TEXT);
+      const textNodes=[]; let n;
+      while(n=walker.nextNode()) textNodes.push(n);
+      textNodes.forEach(tn=>{
+        if(!tn.nodeValue || !tn.nodeValue.trim()) return;
+        const m=document.createElement('mark');
+        m.className='h-'+h.color+(h.comment?' has-cmt':'');
+        m.dataset.id=h.id;
+        m.onclick=()=>openHlPopup(h.id);
+        tn.parentNode.replaceChild(m, tn);
+        m.appendChild(tn);
+      });
+      r.insertNode(frag);
+    }catch(e){ console.warn('applyHighlights:', e); }
   });
 }
 
-pagesHost.addEventListener('mouseup', onSelectionMaybe);
-pagesHost.addEventListener('touchend', onSelectionMaybe);
+bookScroll.addEventListener('mouseup', onSelectionMaybe);
+bookScroll.addEventListener('touchend', onSelectionMaybe);
 function onSelectionMaybe(){
   setTimeout(()=>{
     const sel=window.getSelection();
     if(!sel || sel.isCollapsed || sel.rangeCount===0){ selToolbar.classList.remove('show'); return; }
     const range=sel.getRangeAt(0);
-    if(!pagesHost.contains(range.commonAncestorContainer)){ return; }
-    // Tomamos como referencia la página visible actual para calcular offsets.
-    const currentView=pageNodes[currentPage];
-    const container=currentView ? currentView.querySelector('.page-inner') : null;
-    if(!container) return;
+    if(!bookScroll.contains(range.commonAncestorContainer)){ return; }
     pendingRange={
-      start: nodeOffset(container, range.startContainer, range.startOffset),
-      end: nodeOffset(container, range.endContainer, range.endOffset),
+      start: nodeOffset(bookContent, range.startContainer, range.startOffset),
+      end: nodeOffset(bookContent, range.endContainer, range.endOffset),
       text: sel.toString().slice(0,300)
     };
     if(pendingRange.start<0||pendingRange.end<0||pendingRange.start===pendingRange.end) return;
@@ -1241,10 +1305,9 @@ function goToLibrary(){
   finishChapterTiming();
   pushBookState();
   spine=[]; zip=null; bookId=''; highlights=[]; wordCounts=[]; totalBookWords=0;
-  pageRestoreTarget=0; currentPage=0; totalPages=1;
-  pageNodes=[];
-  pagesHost.style.display='none';
-  pagesHost.innerHTML='';
+  pageRestoreTarget=0; currentPage=0; totalPages=1; pageWidth=0;
+  bookScroll.style.display='none';
+  bookContent.innerHTML='';
   navFoot.style.display='none';
   $('#libBtn').style.display='none';
   $('#bookTitle').textContent='Sin libro cargado';
