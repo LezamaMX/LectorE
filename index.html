@@ -150,7 +150,7 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
 .lib-card{display:flex; gap:12px; padding:12px 14px; border-radius:10px; background:var(--panel); border:1px solid var(--line); cursor:pointer; text-align:left; align-items:center;}
 .lib-card:hover{border-color:var(--accent)}
 .lib-card .cover{width:56px; height:76px; flex-shrink:0; border-radius:6px; overflow:hidden; background:linear-gradient(160deg, var(--accent), var(--ink-soft)); display:flex; align-items:center; justify-content:center; color:var(--paper); font-family:var(--serif); font-size:22px; font-weight:600;}
-.lib-card .cover img{width:100%; height:100%; object-fit:cover; display:block;}
+.lib-card .cover img{width:100%; height:100%; object-fit:contain; display:block;}
 .lib-card .info{flex:1; min-width:0;}
 .lib-card .info h3{margin:0 0 3px; font-family:var(--serif); font-size:16px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .lib-card .info p{margin:0; font-size:12.5px; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
@@ -988,9 +988,18 @@ async function renderChapter(index){
     totalPages=1;
   }else{
     // Paginación por bloques pero ahora sí partiendo bloques grandes.
-    const pageViews=await paginateContent(body);
-    if(thisRender!==renderSequence || renderBookId!==bookId) return;
+    // Limpiamos el capítulo anterior ANTES de construir el nuevo, porque
+    // paginateContent va anexando cada página real a pagesHost a medida
+    // que las construye (necesita estar conectada al documento para poder
+    // medir alturas de verdad).
     pagesHost.innerHTML='';
+    const pageViews=await paginateContent(body);
+    if(thisRender!==renderSequence || renderBookId!==bookId){
+      // Este render quedó obsoleto (el usuario ya pasó a otro capítulo):
+      // quitamos las páginas que alcanzamos a construir para no dejarlas huérfanas.
+      pageViews.forEach(v=>{ if(v.parentNode===pagesHost) pagesHost.removeChild(v); });
+      return;
+    }
     pageNodes=pageViews;
     pageViews.forEach((v,idx)=>v.classList.toggle('active', idx===0));
     totalPages=pageViews.length;
@@ -1049,43 +1058,37 @@ async function paginateContent(body){
     }
   }
 
-  // Página modelo para medir. Fuera de pantalla pero con medidas reales.
-  const modelView=document.createElement('div');
-  modelView.className='page-view';
-  modelView.style.position='absolute';
-  modelView.style.visibility='hidden';
-  modelView.style.left='-99999px';
-  modelView.style.top='0';
-  modelView.style.width=readerWrap.clientWidth+'px';
-  modelView.style.height=readerWrap.clientHeight+'px';
-  const modelPage=document.createElement('div');
-  modelPage.className='page';
-  const modelInner=document.createElement('div');
-  modelInner.className='page-inner';
-  modelPage.appendChild(modelInner);
-  modelView.appendChild(modelPage);
-  pagesHost.appendChild(modelView);
-
-  void modelView.offsetHeight;
-  const limitH=modelInner.clientHeight;
-  const limitW=modelInner.clientWidth;
-
-  // Estructura de páginas finales.
+  // IMPORTANTE: cada página final se crea YA anexada a pagesHost (oculta
+  // fuera de pantalla mientras se construye). Un elemento que no está
+  // conectado al documento no tiene caja de layout real: su scrollHeight
+  // siempre vale 0, así que "fits()" daba siempre "sí cabe" y el capítulo
+  // entero terminaba amontonado en una sola página, con casi todo el texto
+  // recortado (invisible) por el overflow:hidden de .page-inner. Eso es lo
+  // que se veía como "se come texto" al pasar de página: al llegar al
+  // límite visual de esa única página, el resto del capítulo se saltaba
+  // directamente al siguiente capítulo del EPUB.
   const finalPages=[]; // {view, inner}
   function newFinalPage(){
     const view=document.createElement('div');
     view.className='page-view';
+    // Mientras medimos: visible para el layout (visibility, no display:none)
+    // pero fuera de pantalla, con el mismo tamaño que tendrá cuando se muestre.
+    view.style.cssText='position:absolute; visibility:hidden; left:-99999px; top:0; display:block; width:'+readerWrap.clientWidth+'px; height:'+readerWrap.clientHeight+'px;';
     const page=document.createElement('div');
     page.className='page';
     const inner=document.createElement('div');
     inner.className='page-inner';
     page.appendChild(inner);
     view.appendChild(page);
+    pagesHost.appendChild(view); // <- conectada de verdad al documento
     finalPages.push({view, inner});
     return {view, inner};
   }
 
   let current=newFinalPage();
+  void current.view.offsetHeight; // fuerza el primer layout
+  const limitH=current.inner.clientHeight;
+  const limitW=current.inner.clientWidth;
 
   // Función que comprueba si "contentInner" + un clon cabe en limitH.
   function fits(inner, el){
@@ -1145,14 +1148,26 @@ async function paginateContent(body){
     }
   }
 
-  pagesHost.removeChild(modelView);
+  // Quitamos páginas vacías y les retiramos el estilo temporal de medición
+  // (la clase .page-view / .active ya controla cómo se ven de verdad).
+  const kept=[];
+  finalPages.forEach(p=>{
+    const hasContent = p.inner.textContent.trim().length>0 || p.inner.querySelector('img,svg,image');
+    if(hasContent){
+      p.view.removeAttribute('style');
+      kept.push(p.view);
+    }else{
+      pagesHost.removeChild(p.view);
+    }
+  });
 
-  // Filtramos páginas vacías.
-  const filtered=finalPages.filter(p=>{
-    return p.inner.textContent.trim().length>0 || p.inner.querySelector('img,svg,image');
-  }).map(p=>p.view);
+  if(!kept.length){
+    const {view}=newFinalPage();
+    view.removeAttribute('style');
+    kept.push(view);
+  }
 
-  return filtered.length?filtered:[newFinalPage().view];
+  return kept;
 }
 
 function isImageBlock(block){
