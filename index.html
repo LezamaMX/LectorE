@@ -190,7 +190,7 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
       <button class="icon" id="menuBtn" title="Índice">☰</button>
       <button class="icon" id="libBtn" title="Biblioteca" style="display:none">⌂</button>
       
-      <!-- BOTÓN VOLVER (Nuevo) -->
+      <!-- BOTÓN VOLVER -->
       <button class="icon" id="backLinkBtn" title="Volver a la lectura" style="display:none; width:auto; padding:0 10px; font-weight:600; font-size:12px; background:var(--accent); color:var(--paper); border:none;">← Volver</button>
       
       <label class="upload" id="uploadLbl">Abrir EPUB<input type="file" id="file" accept=".epub"></label>
@@ -254,7 +254,7 @@ let totalPages=1;
 let pageRestoreTarget=0;
 let pendingGoLastPage=false;
 
-// Historial para los enlaces de notas (Nuevo)
+// Historial para los enlaces de notas
 let linkHistory = [];
 let pendingAnchor = null;
 
@@ -559,18 +559,21 @@ function repaginate(){
 }
 window.addEventListener('resize', repaginate);
 
-// === NUEVO: FUNCIONES DE ENLACES ===
+// === NUEVA Y MEJORADA LÓGICA DE ENLACES ===
 function getAnchorPage(anchor) {
   if(!anchor) return -1;
   const container = pagesHost.querySelector('.page-container');
   if(!container) return -1;
   try {
-    const el = container.querySelector(`[id="${anchor}"], [name="${anchor}"]`);
+    const safeAnchor = anchor.replace(/"/g, '\\"');
+    const el = container.querySelector(`[id="${safeAnchor}"], [name="${safeAnchor}"]`);
     if (el) {
-      const oldT = container.style.transform; container.style.transform = 'none';
-      const relX = el.getBoundingClientRect().left - pagesHost.getBoundingClientRect().left;
-      container.style.transform = oldT;
-      return Math.max(0, Math.floor(relX / pagesHost.clientWidth));
+      // Calculamos la distancia visual directa desde el origen absoluto sin desarmar CSS
+      const hostRect = pagesHost.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      const relX = elRect.left - hostRect.left;
+      const pageDiff = Math.floor(relX / pagesHost.clientWidth);
+      return Math.max(0, currentPage + pageDiff);
     }
   } catch(e){}
   return -1;
@@ -586,17 +589,36 @@ pagesHost.addEventListener('click', e => {
     linkHistory.push({ index: currentIndex, page: currentPage });
     $('#backLinkBtn').style.display = 'inline-block';
 
-    const resolved = resolvePath(spine[currentIndex], href);
-    const [pathPart, hashPart] = resolved.split('#');
+    // FIX: Corrección estricta para resolver rutas relativas a la página
+    let pathPart = '', hashPart = '';
+    if (href.startsWith('#')) {
+      pathPart = spine[currentIndex].split('#')[0];
+      hashPart = href.substring(1);
+    } else {
+      const resolved = resolvePath(spine[currentIndex], href);
+      const splitIdx = resolved.indexOf('#');
+      if (splitIdx !== -1) {
+        pathPart = resolved.substring(0, splitIdx);
+        hashPart = resolved.substring(splitIdx + 1);
+      } else {
+        pathPart = resolved;
+      }
+    }
+
     let targetIndex = spine.findIndex(s => s.split('#')[0] === pathPart);
-    if (targetIndex === -1 && !pathPart) targetIndex = currentIndex;
+    if (targetIndex === -1 && href.startsWith('#')) targetIndex = currentIndex;
 
     if (targetIndex >= 0 && targetIndex < spine.length) {
       if (targetIndex !== currentIndex) {
         pendingAnchor = hashPart; pageRestoreTarget = 0; renderChapter(targetIndex);
       } else if (hashPart) {
         const p = getAnchorPage(hashPart);
-        if (p !== -1) { currentPage = Math.min(p, totalPages - 1); showPage(currentPage); updatePageUI(); pushBookState(); }
+        if (p !== -1) { 
+          currentPage = Math.min(p, totalPages - 1); 
+          showPage(currentPage); 
+          updatePageUI(); 
+          pushBookState(); 
+        }
       }
     }
   }
@@ -718,7 +740,7 @@ function goToLibrary(){
   finishChapterTiming(); pushBookState();
   spine=[]; zip=null; bookId=''; highlights=[]; wordCounts=[]; totalBookWords=0;
   pageRestoreTarget=0; currentPage=0; totalPages=1;
-  linkHistory=[]; $('#backLinkBtn').style.display='none'; // Reiniciamos el botón de volver
+  linkHistory=[]; $('#backLinkBtn').style.display='none'; 
   pagesHost.style.display='none'; pagesHost.innerHTML='';
   navFoot.style.display='none'; $('#libBtn').style.display='none';
   $('#bookTitle').textContent='Sin libro cargado'; $('#bookAuthor').textContent=''; $('#chapterTitle').textContent='';
