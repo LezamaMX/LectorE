@@ -1,0 +1,15 @@
+{
+  "name": "Mi E-Reader Personal",
+  "short_name": "E-Reader",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#FAF7F0",
+  "theme_color": "#2F4B3C",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3389/3389081.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
