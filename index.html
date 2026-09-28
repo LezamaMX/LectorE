@@ -753,7 +753,18 @@ function renderHlist(){
 }
 function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
-// === FIX: API COMPARTIR EN MÓVILES PARA EXPORTACIONES ===
+// === FUNCIONES DE EXPORTACIÓN Y GENERADOR APA 7 ===
+function bookTitleSafe(){ return (($('#bookTitle').textContent||'libro').replace(/[^a-z0-9\- ]/gi,'').trim().slice(0,60))||'libro'; }
+function getChapterLabel(href,i){ const t=tocItems.find(t=>t.href.split('#')[0]===href.split('#')[0]); return t?t.label:'Capítulo '+(i+1); }
+function groupByChapter(){
+  const groups=[];
+  spine.forEach((href,i)=>{
+    const items=highlights.filter(h=>h.href===href).sort((a,b)=>a.start-b.start);
+    if(items.length) groups.push({label:getChapterLabel(href,i), items});
+  });
+  return groups;
+}
+
 function getAPACitation() {
   let a = $('#bookAuthor').textContent || 'Autor desconocido';
   let parts = a.split(' '); let formattedAuthor = a;
@@ -762,113 +773,154 @@ function getAPACitation() {
   return `${formattedAuthor} (${y}). ${t}. ${p}`.trim() + '.';
 }
 
-// NUEVA FUNCIÓN SAVEFILE COMPATIBLE CON PWA/MÓVIL
-async function saveFile(filename, blob){
-  // Intentar usar Web Share API nativo de celulares
-  if (navigator.canShare) {
-    const file = new File([blob], filename, { type: blob.type || (filename.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') });
-    if (navigator.canShare({ files: [file] })) {
-      try {
-        await navigator.share({
-          files: [file],
-          title: filename,
-          text: 'Aquí están mis notas exportadas.'
-        });
-        return; // Termina si el usuario lo compartió/guardó con éxito
-      } catch (e) {
-        if (e.name === 'AbortError') return; // El usuario simplemente canceló el menú
-        console.warn('Share API falló, intentando método tradicional', e);
+// === FIX: API COMPARTIR EN MÓVILES PARA EXPORTACIONES ===
+async function saveFile(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  
+  // Cambiamos la interfaz a una pantalla de éxito interactiva
+  $('#loadingText').textContent = '¡Documento listo!';
+  $('#loading .spinner').style.display = 'none';
+  if($('#loadingBar')) $('#loadingBar').style.display = 'none';
+  
+  let actions = $('#loadingActions');
+  if(!actions) {
+     actions = document.createElement('div');
+     actions.id = 'loadingActions';
+     actions.style.marginTop = '20px';
+     actions.innerHTML = `
+       <a id="downloadLinkBtn" href="#" download class="upload" style="text-decoration:none; display:inline-block; padding: 12px 24px; font-size: 15px; margin-bottom:15px; font-weight:600; background:#2F4B3C; color:#FAF7F0; border-radius:8px;">⬇ Guardar o Compartir</a>
+       <br>
+       <button id="closeLoadingBtn" style="background:transparent; border:1px solid rgba(255,255,255,0.6); color:#fff; padding:8px 24px; border-radius:8px; cursor:pointer; font-size:14px; font-family:var(--sans);">Cerrar</button>
+     `;
+     $('#loading').appendChild(actions);
+  }
+  actions.style.display = 'block';
+  
+  const dlBtn = $('#downloadLinkBtn');
+  dlBtn.href = url;
+  dlBtn.download = filename;
+  
+  // Al tocar este botón físico, Android/iOS ya permiten la acción sin bloquearla por seguridad
+  dlBtn.onclick = (e) => {
+    if (navigator.canShare) {
+      const fileType = filename.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      const file = new File([blob], filename, { type: fileType });
+      if (navigator.canShare({ files: [file] })) {
+         e.preventDefault(); 
+         navigator.share({ files: [file], title: filename })
+         .catch(err => {
+             console.warn("Share cancelado", err);
+             // Fallback silencioso por si falla algo interno
+             const a = document.createElement('a'); a.href = url; a.download = filename;
+             document.body.appendChild(a); a.click(); document.body.removeChild(a);
+         });
       }
     }
-  }
-  
-  // Método de descarga tradicional para PC
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download=filename;
-  a.style.display = 'none';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  setTimeout(()=>URL.revokeObjectURL(url), 4000);
+  };
+
+  $('#closeLoadingBtn').onclick = () => {
+     hideLoading();
+     $('#loading .spinner').style.display = 'block'; 
+     actions.style.display = 'none';
+     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 }
 
 async function exportPdf(){
   if(!highlights.length){ alert('Todavía no tienes subrayados para exportar.'); return; }
-  const jsPDFctor=window.jspdf && window.jspdf.jsPDF;
-  if(!jsPDFctor){ alert('No se pudo cargar el generador de PDF.'); return; }
-  const doc=new jsPDFctor({unit:'pt', format:'a4'});
-  const marginX=48; let y=64;
-  const pageH=doc.internal.pageSize.getHeight(), pageW=doc.internal.pageSize.getWidth(), maxW=pageW-marginX*2;
-  doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.setTextColor(20);
-  doc.text($('#bookTitle').textContent||'Subrayados', marginX, y); y+=22;
-  doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(120);
-  doc.text($('#bookAuthor').textContent||'', marginX, y); y+=26; doc.setTextColor(20);
-  const colorMap={yellow:[246,216,136], green:[185,227,190], blue:[185,214,238], pink:[240,195,218]};
+  showLoading('Generando PDF...', false);
   
-  groupByChapter().forEach(g=>{
-    if(y>pageH-90){ doc.addPage(); y=64; }
-    doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(20);
-    doc.text(g.label, marginX, y); y+=18;
-    g.items.forEach(h=>{
-      const lines=doc.splitTextToSize(h.text, maxW-14);
-      const cLines=h.comment?doc.splitTextToSize('Nota: '+h.comment, maxW-14):[];
-      const blockH=lines.length*14 + cLines.length*12 + 20;
-      if(y+blockH>pageH-56){ doc.addPage(); y=64; }
-      const c=colorMap[h.color]||colorMap.yellow;
-      doc.setFillColor(c[0],c[1],c[2]); doc.rect(marginX-6, y-10, 4, lines.length*14+2, 'F');
-      doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.setTextColor(30);
-      doc.text(lines, marginX+6, y); y+=lines.length*14+2;
-      if(cLines.length){
-        doc.setFont('helvetica','italic'); doc.setFontSize(10); doc.setTextColor(110);
-        doc.text(cLines, marginX+6, y); y+=cLines.length*12+4; doc.setTextColor(30);
+  setTimeout(async () => {
+      try {
+          const jsPDFctor=window.jspdf && window.jspdf.jsPDF;
+          if(!jsPDFctor){ hideLoading(); alert('No se pudo cargar el generador de PDF.'); return; }
+          const doc=new jsPDFctor({unit:'pt', format:'a4'});
+          const marginX=48; let y=64;
+          const pageH=doc.internal.pageSize.getHeight(), pageW=doc.internal.pageSize.getWidth(), maxW=pageW-marginX*2;
+          doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.setTextColor(20);
+          doc.text($('#bookTitle').textContent||'Subrayados', marginX, y); y+=22;
+          doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(120);
+          doc.text($('#bookAuthor').textContent||'', marginX, y); y+=26; doc.setTextColor(20);
+          const colorMap={yellow:[246,216,136], green:[185,227,190], blue:[185,214,238], pink:[240,195,218]};
+          
+          groupByChapter().forEach(g=>{
+            if(y>pageH-90){ doc.addPage(); y=64; }
+            doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(20);
+            doc.text(g.label, marginX, y); y+=18;
+            g.items.forEach(h=>{
+              const lines=doc.splitTextToSize(h.text, maxW-14);
+              const cLines=h.comment?doc.splitTextToSize('Nota: '+h.comment, maxW-14):[];
+              const blockH=lines.length*14 + cLines.length*12 + 20;
+              if(y+blockH>pageH-56){ doc.addPage(); y=64; }
+              const c=colorMap[h.color]||colorMap.yellow;
+              doc.setFillColor(c[0],c[1],c[2]); doc.rect(marginX-6, y-10, 4, lines.length*14+2, 'F');
+              doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.setTextColor(30);
+              doc.text(lines, marginX+6, y); y+=lines.length*14+2;
+              if(cLines.length){
+                doc.setFont('helvetica','italic'); doc.setFontSize(10); doc.setTextColor(110);
+                doc.text(cLines, marginX+6, y); y+=cLines.length*12+4; doc.setTextColor(30);
+              }
+              y+=10;
+            });
+            y+=8;
+          });
+
+          y+=20;
+          if(y>pageH-50){ doc.addPage(); y=64; }
+          doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(20);
+          doc.text('Referencia (APA 7):', marginX, y); y+=16;
+          doc.setFont('helvetica','normal'); doc.setFontSize(10);
+          const apaLines = doc.splitTextToSize(getAPACitation(), maxW);
+          doc.text(apaLines, marginX, y);
+
+          await saveFile(bookTitleSafe()+'-subrayados.pdf', doc.output('blob'));
+      } catch(e) {
+          hideLoading();
+          alert('Error al generar PDF: ' + e.message);
       }
-      y+=10;
-    });
-    y+=8;
-  });
-
-  y+=20;
-  if(y>pageH-50){ doc.addPage(); y=64; }
-  doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(20);
-  doc.text('Referencia (APA 7):', marginX, y); y+=16;
-  doc.setFont('helvetica','normal'); doc.setFontSize(10);
-  const apaLines = doc.splitTextToSize(getAPACitation(), maxW);
-  doc.text(apaLines, marginX, y);
-
-  await saveFile(bookTitleSafe()+'-subrayados.pdf', doc.output('blob'));
+  }, 100);
 }
 
 async function exportDocx(){
   if(!highlights.length){ alert('Todavía no tienes subrayados para exportar.'); return; }
-  const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const hlMap={yellow:'yellow',green:'green',blue:'cyan',pink:'magenta'};
-  let body='';
-  body+='<w:p><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t>'+esc($('#bookTitle').textContent||'Subrayados')+'</w:t></w:r></w:p>';
-  body+='<w:p><w:r><w:rPr><w:i/><w:color w:val="666666"/></w:rPr><w:t>'+esc($('#bookAuthor').textContent||'')+'</w:t></w:r></w:p><w:p/>';
+  showLoading('Generando Word...', false);
   
-  groupByChapter().forEach(g=>{
-    body+='<w:p><w:r><w:rPr><w:b/><w:sz w:val="26"/></w:rPr><w:t>'+esc(g.label)+'</w:t></w:r></w:p>';
-    g.items.forEach(h=>{
-      body+='<w:p><w:r><w:rPr><w:highlight w:val="'+(hlMap[h.color]||'yellow')+'"/></w:rPr><w:t xml:space="preserve">'+esc(h.text)+'</w:t></w:r></w:p>';
-      if(h.comment) body+='<w:p><w:r><w:rPr><w:i/><w:color w:val="666666"/></w:rPr><w:t xml:space="preserve">Nota: '+esc(h.comment)+'</w:t></w:r></w:p>';
-      body+='<w:p/>';
-    });
-  });
+  setTimeout(async () => {
+      try {
+          const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          const hlMap={yellow:'yellow',green:'green',blue:'cyan',pink:'magenta'};
+          let body='';
+          body+='<w:p><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t>'+esc($('#bookTitle').textContent||'Subrayados')+'</w:t></w:r></w:p>';
+          body+='<w:p><w:r><w:rPr><w:i/><w:color w:val="666666"/></w:rPr><w:t>'+esc($('#bookAuthor').textContent||'')+'</w:t></w:r></w:p><w:p/>';
+          
+          groupByChapter().forEach(g=>{
+            body+='<w:p><w:r><w:rPr><w:b/><w:sz w:val="26"/></w:rPr><w:t>'+esc(g.label)+'</w:t></w:r></w:p>';
+            g.items.forEach(h=>{
+              body+='<w:p><w:r><w:rPr><w:highlight w:val="'+(hlMap[h.color]||'yellow')+'"/></w:rPr><w:t xml:space="preserve">'+esc(h.text)+'</w:t></w:r></w:p>';
+              if(h.comment) body+='<w:p><w:r><w:rPr><w:i/><w:color w:val="666666"/></w:rPr><w:t xml:space="preserve">Nota: '+esc(h.comment)+'</w:t></w:r></w:p>';
+              body+='<w:p/>';
+            });
+          });
 
-  body+='<w:p/><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Referencia (APA 7):</w:t></w:r></w:p>';
-  body+='<w:p><w:r><w:t>'+esc(getAPACitation())+'</w:t></w:r></w:p>';
+          body+='<w:p/><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Referencia (APA 7):</w:t></w:r></w:p>';
+          body+='<w:p><w:r><w:t>'+esc(getAPACitation())+'</w:t></w:r></w:p>';
 
-  const documentXml='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'+body+'<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/></w:sectPr></w:body></w:document>';
-  const contentTypes='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>';
-  const rels='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>';
-  const outZip=new JSZip();
-  outZip.file('[Content_Types].xml', contentTypes);
-  outZip.folder('_rels').file('.rels', rels);
-  outZip.folder('word').file('document.xml', documentXml);
-  const blob=await outZip.generateAsync({type:'blob', mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
-  await saveFile(bookTitleSafe()+'-subrayados.docx', blob);
+          const documentXml='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'+body+'<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/></w:sectPr></w:body></w:document>';
+          const contentTypes='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>';
+          const rels='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>';
+          const outZip=new JSZip();
+          outZip.file('[Content_Types].xml', contentTypes);
+          outZip.folder('_rels').file('.rels', rels);
+          outZip.folder('word').file('document.xml', documentXml);
+          const blob=await outZip.generateAsync({type:'blob', mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+          
+          await saveFile(bookTitleSafe()+'-subrayados.docx', blob);
+      } catch(e) {
+          hideLoading();
+          alert('Error al generar Word: ' + e.message);
+      }
+  }, 100);
 }
-
-$('#expPdf').onclick=exportPdf;
-$('#expDocx').onclick=exportDocx;
 
 function goToLibrary(){
   finishChapterTiming(); pushBookState();
