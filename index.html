@@ -97,17 +97,14 @@ input[type=file]{display:none}
   overflow-wrap: break-word;
 }
 
-/* === ESCUDO ANTI-DESBORDES PARA CUALQUIER LIBRO === */
-/* 1. Ningún elemento hijo puede ser más ancho que la columna */
 .page-container * {
   max-width: 100% !important;
 }
 
-/* 2. Control estricto para las imágenes y contenedores SVG */
 .page-container img, 
 .page-container svg {
   max-width: 100% !important;
-  max-height: 75vh !important; /* Mantiene la portada/imagen en proporción a la pantalla */
+  max-height: 75vh !important;
   object-fit: contain !important;
   display: block !important;
   margin: 10px auto !important;
@@ -115,7 +112,6 @@ input[type=file]{display:none}
   page-break-inside: avoid !important;
 }
 
-/* 3. Permite que la imagen dentro del lienzo SVG se adapte sin romperse */
 .page-container svg image {
   max-width: 100% !important;
   max-height: 100% !important;
@@ -123,7 +119,6 @@ input[type=file]{display:none}
 
 .page-container p { margin: 0 0 1em; }
 
-/* Los enlaces de las notas */
 .page-container a {
   color: var(--accent);
   text-decoration: none;
@@ -138,8 +133,53 @@ mark.h-pink{background:#F0C3DA !important; color:inherit !important; padding:1px
 mark{border-radius:2px; cursor:pointer; padding:0 1px; -webkit-box-decoration-break:clone; box-decoration-break:clone;}
 mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
 
-.empty{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:14px; color:var(--ink-soft); text-align:center; padding:24px; overflow-y:auto;}
-.empty .big{font-family:var(--serif); font-size:22px; color:var(--ink)}
+/* === MODIFICACIONES DE PANTALLA BIBLIOTECA (ALINEACIÓN IZQUIERDA Y WALLPAPER) === */
+.empty {
+  position: absolute; 
+  inset: 0; 
+  display: flex; 
+  align-items: center; 
+  justify-content: flex-start; /* Hace que el contenido comience desde arriba */
+  flex-direction: column; 
+  gap: 14px; 
+  color: var(--ink-soft); 
+  text-align: left; /* Todo el texto alineado a la izquierda */
+  padding: 10vh 24px 24px; /* Un poco de margen superior */
+  overflow-y: auto; 
+  z-index: 1; /* Crea un contexto para el wallpaper */
+}
+
+/* La imagen de fondo semitransparente */
+.empty::before {
+  content: ""; 
+  position: absolute; 
+  inset: 0; 
+  min-height: 100%;
+  /* Aquí puedes cambiar el enlace por la foto que quieras */
+  background: url('https://images.unsplash.com/photo-1448375240586-882707db888b?q=80&w=1920&auto=format&fit=crop') center/cover no-repeat fixed;
+  opacity: 0.12; /* Nivel de transparencia para que se vea sutil */
+  pointer-events: none; 
+  z-index: -1;
+}
+
+/* Fuerza a los elementos internos a no superar el ancho de las tarjetas */
+.empty > * {
+  width: 100%;
+  max-width: 760px;
+}
+
+.empty p {
+  margin: 0;
+}
+
+.empty .big {
+  font-family: var(--serif); 
+  font-size: 32px; /* Título un poco más grande y elegante */
+  font-weight: 600;
+  color: var(--ink); 
+  margin: 0;
+}
+
 .library{width:100%; max-width:760px; display:flex; flex-direction:column; gap:10px; padding:8px 0 24px;}
 .lib-card{display:flex; gap:12px; padding:12px 14px; border-radius:10px; background:var(--panel); border:1px solid var(--line); cursor:pointer; text-align:left; align-items:center;}
 .lib-card:hover{border-color:var(--accent)}
@@ -151,7 +191,14 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
 .lib-card .info .prog{margin-top:6px; font-size:11.5px; color:var(--ink-soft);}
 .lib-card .del{background:none; border:none; color:var(--ink-soft); font-size:18px; cursor:pointer; padding:4px 8px;}
 .lib-card .del:hover{color:#c0392b}
-.lib-actions{display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top:6px;}
+
+.lib-actions{
+  display: flex; 
+  gap: 10px; 
+  flex-wrap: wrap; 
+  justify-content: flex-start; /* Alinea los botones a la izquierda también */
+  margin-top: 6px;
+}
 .lib-actions button, .lib-actions label{background:var(--accent); color:var(--paper); border:none; padding:10px 18px; border-radius:8px; font-family:var(--sans); font-size:13px; font-weight:500; cursor:pointer;}
 .lib-actions label.secondary{background:var(--panel); color:var(--ink); border:1px solid var(--line);}
 .lib-empty{font-size:13px; color:var(--ink-soft); padding:20px; border:1px dashed var(--line); border-radius:10px; width:100%; max-width:760px;}
@@ -267,7 +314,6 @@ let totalPages=1;
 let pageRestoreTarget=0;
 let pendingGoLastPage=false;
 
-// Historial para los enlaces de notas
 let linkHistory = [];
 let pendingAnchor = null;
 
