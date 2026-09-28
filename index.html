@@ -257,7 +257,7 @@ let spine=[], zip=null, opfDir='', currentIndex=0, tocItems=[];
 let bookId='', highlights=[], wordCounts=[], totalBookWords=0, pendingRange=null;
 let chapterStart=0, activeMs=0, hidden=false;
 let bookCoverDataUrl='';
-let bookYear='', bookPublisher=''; // Variables para la cita APA
+let bookYear='', bookPublisher=''; 
 
 let currentPage=0;
 let totalPages=1;
@@ -493,7 +493,6 @@ async function loadEpub(arrayBuffer){
     const opfPath=containerDoc.querySelector('rootfile').getAttribute('full-path'); opfDir=opfPath.includes('/')?opfPath.slice(0,opfPath.lastIndexOf('/')+1):'';
     const opfDoc=new DOMParser().parseFromString(await zip.file(opfPath).async('string'),'application/xml');
     
-    // Extracción de metadatos (Título, Autor, Año, Editorial)
     const getMeta = tag => { const e=opfDoc.getElementsByTagName(tag)[0]||opfDoc.getElementsByTagName('dc:'+tag)[0]; return e?e.textContent.trim():''; };
     const title=getMeta('title')||'Libro sin título';
     const author=getMeta('creator')||'';
@@ -754,37 +753,41 @@ function renderHlist(){
 }
 function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
-// === FUNCIONES DE EXPORTACIÓN Y GENERADOR APA 7 ===
-function bookTitleSafe(){ return (($('#bookTitle').textContent||'libro').replace(/[^a-z0-9\- ]/gi,'').trim().slice(0,60))||'libro'; }
-function getChapterLabel(href,i){ const t=tocItems.find(t=>t.href.split('#')[0]===href.split('#')[0]); return t?t.label:'Capítulo '+(i+1); }
-function groupByChapter(){
-  const groups=[];
-  spine.forEach((href,i)=>{
-    const items=highlights.filter(h=>h.href===href).sort((a,b)=>a.start-b.start);
-    if(items.length) groups.push({label:getChapterLabel(href,i), items});
-  });
-  return groups;
-}
-function saveFile(filename, blob){
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download=filename;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  setTimeout(()=>URL.revokeObjectURL(url), 4000);
-}
-
-// Generador de Referencia APA 7
+// === FIX: API COMPARTIR EN MÓVILES PARA EXPORTACIONES ===
 function getAPACitation() {
   let a = $('#bookAuthor').textContent || 'Autor desconocido';
-  let parts = a.split(' ');
-  let formattedAuthor = a;
-  if(parts.length > 1) {
-    let last = parts.pop();
-    formattedAuthor = last + ', ' + parts.map(p => p.charAt(0).toUpperCase() + '.').join(' ');
-  }
-  let y = bookYear || 's.f.';
-  let t = $('#bookTitle').textContent || 'Sin título';
-  let p = bookPublisher && bookPublisher !== 's.e.' ? bookPublisher : '';
+  let parts = a.split(' '); let formattedAuthor = a;
+  if(parts.length > 1) { let last = parts.pop(); formattedAuthor = last + ', ' + parts.map(p => p.charAt(0).toUpperCase() + '.').join(' '); }
+  let y = bookYear || 's.f.'; let t = $('#bookTitle').textContent || 'Sin título'; let p = bookPublisher && bookPublisher !== 's.e.' ? bookPublisher : '';
   return `${formattedAuthor} (${y}). ${t}. ${p}`.trim() + '.';
+}
+
+// NUEVA FUNCIÓN SAVEFILE COMPATIBLE CON PWA/MÓVIL
+async function saveFile(filename, blob){
+  // Intentar usar Web Share API nativo de celulares
+  if (navigator.canShare) {
+    const file = new File([blob], filename, { type: blob.type || (filename.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') });
+    if (navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: filename,
+          text: 'Aquí están mis notas exportadas.'
+        });
+        return; // Termina si el usuario lo compartió/guardó con éxito
+      } catch (e) {
+        if (e.name === 'AbortError') return; // El usuario simplemente canceló el menú
+        console.warn('Share API falló, intentando método tradicional', e);
+      }
+    }
+  }
+  
+  // Método de descarga tradicional para PC
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=filename;
+  a.style.display = 'none';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
 }
 
 async function exportPdf(){
@@ -822,7 +825,6 @@ async function exportPdf(){
     y+=8;
   });
 
-  // Agrega la Cita APA al final del PDF
   y+=20;
   if(y>pageH-50){ doc.addPage(); y=64; }
   doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(20);
@@ -851,7 +853,6 @@ async function exportDocx(){
     });
   });
 
-  // Agrega la Cita APA al final del Word
   body+='<w:p/><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Referencia (APA 7):</w:t></w:r></w:p>';
   body+='<w:p><w:r><w:t>'+esc(getAPACitation())+'</w:t></w:r></w:p>';
 
@@ -868,7 +869,6 @@ async function exportDocx(){
 
 $('#expPdf').onclick=exportPdf;
 $('#expDocx').onclick=exportDocx;
-// ==========================================
 
 function goToLibrary(){
   finishChapterTiming(); pushBookState();
