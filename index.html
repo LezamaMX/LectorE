@@ -570,11 +570,23 @@ async function openCloudBook(meta) {
   }
 }
 
+// === COMPORTAMIENTO TÁCTIL MENÚ ===
+// Abrir/cerrar el menú evitando que el toque se propague
+$('#menuBtn').onclick = (e) => {
+  e.stopPropagation();
+  $('#side').classList.toggle('open');
+};
+// Cerrar el menú si se toca cualquier parte del contenedor principal
+$('.main').addEventListener('pointerdown', () => {
+  if ($('#side').classList.contains('open')) {
+    $('#side').classList.remove('open');
+  }
+});
+
 $('#themeBtn').onclick=()=>{ themeIdx=(themeIdx+1)%themes.length; document.documentElement.setAttribute('data-theme', themes[themeIdx]); };
 $('#fontUp').onclick=()=>{ fontIdx=Math.min(fontIdx+1,fontSizes.length-1); applyFont(); repaginate(); };
 $('#fontDown').onclick=()=>{ fontIdx=Math.max(fontIdx-1,0); applyFont(); repaginate(); };
 function applyFont(){ document.documentElement.style.setProperty('--fs', fontSizes[fontIdx]+'px'); }
-$('#menuBtn').onclick=()=>$('#side').classList.toggle('open');
 $('#tabToc').onclick=()=>switchTab('toc'); $('#tabHl').onclick=()=>switchTab('hl');
 function switchTab(t){
   tocEl.classList.toggle('show', t==='toc'); hlistEl.classList.toggle('show', t==='hl');
