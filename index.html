@@ -752,18 +752,27 @@ function applyHighlights(){
   });
 }
 
-pagesHost.addEventListener('mouseup', onSelectionMaybe); pagesHost.addEventListener('touchend', onSelectionMaybe);
+// === FIX: SELECCIÓN EN DISPOSITIVOS MÓVILES ===
+let selTimeout=null;
 function onSelectionMaybe(){
-  setTimeout(()=>{
+  clearTimeout(selTimeout);
+  selTimeout = setTimeout(()=>{
     const sel=window.getSelection(); if(!sel || sel.isCollapsed || sel.rangeCount===0){ selToolbar.classList.remove('show'); return; }
     const range=sel.getRangeAt(0); if(!pagesHost.contains(range.commonAncestorContainer)){ return; }
     const container = pagesHost.querySelector('.page-container'); if(!container) return;
     pendingRange={ start: nodeOffset(container, range.startContainer, range.startOffset), end: nodeOffset(container, range.endContainer, range.endOffset), text: sel.toString().slice(0,300) };
     if(pendingRange.start<0||pendingRange.end<0||pendingRange.start===pendingRange.end) return;
     const rect=range.getBoundingClientRect(); selToolbar.style.left=Math.max(8, rect.left+rect.width/2-70)+'px'; selToolbar.style.top=Math.max(8, rect.top-44)+'px'; selToolbar.classList.add('show');
-  },10);
+  }, 250); // 250ms de espera para que termine el arrastre en el celular
 }
-document.addEventListener('mousedown', e=>{ if(!selToolbar.contains(e.target)) selToolbar.classList.remove('show'); });
+
+document.addEventListener('selectionchange', onSelectionMaybe);
+pagesHost.addEventListener('mouseup', onSelectionMaybe); 
+pagesHost.addEventListener('touchend', onSelectionMaybe);
+
+// Cerrar barra al tocar fuera
+document.addEventListener('pointerdown', e=>{ if(!selToolbar.contains(e.target)) selToolbar.classList.remove('show'); });
+
 selToolbar.querySelectorAll('button[data-c]').forEach(btn=>{ btn.onclick=()=>{ createHighlight(btn.dataset.c, ''); selToolbar.classList.remove('show'); window.getSelection().removeAllRanges(); }; });
 $('#cmtBtn').onclick=()=>{ const comment=prompt('Escribe tu nota:'); selToolbar.classList.remove('show'); if(comment===null) return; createHighlight('yellow', comment); window.getSelection().removeAllRanges(); };
 function createHighlight(color, comment){ if(!pendingRange) return; highlights.push({ id:'h'+Date.now(), href:spine[currentIndex], start:pendingRange.start, end:pendingRange.end, text:pendingRange.text, color, comment }); saveJSON('epubHl_'+bookId, highlights); pushBookState(); renderChapter(currentIndex); }
