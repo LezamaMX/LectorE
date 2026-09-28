@@ -67,7 +67,6 @@ input[type=file]{display:none}
 .bookbar{height:3px; background:var(--line); position:relative; flex-shrink:0;}
 .bookbar i{position:absolute; left:0; top:0; height:100%; background:var(--accent); width:0%; transition:width .3s}
 
-/* -------- Visor paginado -------- */
 .reader-wrap {
   flex: 1;
   position: relative;
@@ -77,15 +76,14 @@ input[type=file]{display:none}
 }
 .pages-host {
   position: absolute;
-  inset: 0;
-  max-width: 720px;
-  margin: 0 auto;
-  overflow: hidden; 
   top: 40px;
   bottom: 40px;
   left: max(20px, env(safe-area-inset-left));
   right: max(20px, env(safe-area-inset-right));
-  padding: 0;
+  max-width: 720px;
+  margin: 0 auto;
+  overflow: hidden;
+  padding: 0; 
 }
 .page-container {
   height: 100%;
@@ -98,14 +96,11 @@ input[type=file]{display:none}
   word-wrap: break-word;
   overflow-wrap: break-word;
 }
-
-/* Imágenes acopladas al viewport para que no se corten */
 .page-container img, 
 .page-container svg, 
 .page-container image {
   max-width: 100% !important;
-  /* Límite estricto de altura relativo a la pantalla para evitar cortes en PC */
-  max-height: 75vh !important; 
+  max-height: 75vh !important;
   width: auto !important;
   height: auto !important;
   object-fit: contain !important;
@@ -115,7 +110,13 @@ input[type=file]{display:none}
 }
 .page-container p { margin: 0 0 1em; }
 
-/* --- Subrayados --- */
+/* Los enlaces de las notas */
+.page-container a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--accent);
+}
+
 mark.h-yellow{background:#F6D888 !important; color:inherit !important; padding:1px 2px; border-radius:2px;}
 mark.h-green{background:#B9E3BE !important; color:inherit !important; padding:1px 2px; border-radius:2px;}
 mark.h-blue{background:#B9D6EE !important; color:inherit !important; padding:1px 2px; border-radius:2px;}
@@ -188,6 +189,10 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
     <div class="topbar">
       <button class="icon" id="menuBtn" title="Índice">☰</button>
       <button class="icon" id="libBtn" title="Biblioteca" style="display:none">⌂</button>
+      
+      <!-- BOTÓN VOLVER (Nuevo) -->
+      <button class="icon" id="backLinkBtn" title="Volver a la lectura" style="display:none; width:auto; padding:0 10px; font-weight:600; font-size:12px; background:var(--accent); color:var(--paper); border:none;">← Volver</button>
+      
       <label class="upload" id="uploadLbl">Abrir EPUB<input type="file" id="file" accept=".epub"></label>
       <div class="title" id="chapterTitle"></div>
       <div class="ctrl">
@@ -207,9 +212,7 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
           <label class="upload secondary">Añadir EPUB local<input type="file" id="fileLib" accept=".epub"></label>
         </div>
       </div>
-      <div class="pages-host" id="pagesHost" style="display:none">
-        <!-- El contenido se inyecta aquí -->
-      </div>
+      <div class="pages-host" id="pagesHost" style="display:none"></div>
     </div>
     <div class="nav-foot" id="navFoot" style="display:none">
       <div class="row">
@@ -251,6 +254,10 @@ let totalPages=1;
 let pageRestoreTarget=0;
 let pendingGoLastPage=false;
 
+// Historial para los enlaces de notas (Nuevo)
+let linkHistory = [];
+let pendingAnchor = null;
+
 const $=s=>document.querySelector(s);
 const readerWrap=$('#readerWrap'), emptyEl=$('#emptyState'), tocEl=$('#toc'),
   hlistEl=$('#hlist'), chapterTitleEl=$('#chapterTitle'), navFoot=$('#navFoot'),
@@ -266,36 +273,24 @@ document.addEventListener('visibilitychange',()=>{
   else { chapterStart=Date.now(); hidden=false; }
 });
 
-// ---------- Service Worker ----------
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch(err => console.log('SW fallo:', err));
-  });
+  window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(e=>{}); });
 }
 
-// ---------- IndexedDB para offline ----------
 const dbPromise = new Promise((resolve, reject) => {
   const req = indexedDB.open('EReaderDB', 1);
   req.onupgradeneeded = e => e.target.result.createObjectStore('books');
   req.onsuccess = e => resolve(e.target.result);
   req.onerror = e => reject(e);
 });
-
 async function saveBookToIDB(id, buffer) {
-  const db = await dbPromise;
-  const tx = db.transaction('books', 'readwrite');
-  tx.objectStore('books').put(buffer, id);
-  return new Promise(r => tx.oncomplete = r);
+  const db = await dbPromise; const tx = db.transaction('books', 'readwrite');
+  tx.objectStore('books').put(buffer, id); return new Promise(r => tx.oncomplete = r);
 }
-
 async function getBookFromIDB(id) {
-  const db = await dbPromise;
-  const tx = db.transaction('books', 'readonly');
+  const db = await dbPromise; const tx = db.transaction('books', 'readonly');
   const req = tx.objectStore('books').get(id);
-  return new Promise(r => {
-    req.onsuccess = () => r(req.result);
-    req.onerror = () => r(null);
-  });
+  return new Promise(r => { req.onsuccess = () => r(req.result); req.onerror = () => r(null); });
 }
 
 function loadJSON(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } }
@@ -308,238 +303,125 @@ function recordSession(words, minutes){
 function avgWpm(){ const s=getStats(); return s.totalMinutes>0.3 ? Math.max(80, s.totalWords/s.totalMinutes) : 200; }
 
 function showLoading(text, showBar){
-  loadingTextEl.textContent = text || 'Cargando…';
-  loadingBar.style.display = showBar ? 'block' : 'none';
-  loadingBarFill.style.width = '0%';
-  loadingEl.classList.add('show');
+  loadingTextEl.textContent = text || 'Cargando…'; loadingBar.style.display = showBar ? 'block' : 'none';
+  loadingBarFill.style.width = '0%'; loadingEl.classList.add('show');
 }
 function setLoadingProgress(pct){ loadingBarFill.style.width = Math.max(0,Math.min(100,pct))+'%'; }
 function hideLoading(){ loadingEl.classList.remove('show'); }
 
-// ---------- Firebase ----------
 const firebaseConfig = {
-  apiKey: "AIzaSyAESUMrg4kBhqhKDgANTBrkfyZjaiYYsK8",
-  authDomain: "ereader-69997.firebaseapp.com",
-  projectId: "ereader-69997",
-  storageBucket: "ereader-69997.firebasestorage.app",
-  messagingSenderId: "596698647357",
-  appId: "1:596698647357:web:afaa6a8f0a31c12e6f9354"
+  apiKey: "AIzaSyAESUMrg4kBhqhKDgANTBrkfyZjaiYYsK8", authDomain: "ereader-69997.firebaseapp.com",
+  projectId: "ereader-69997", storageBucket: "ereader-69997.firebasestorage.app",
+  messagingSenderId: "596698647357", appId: "1:596698647357:web:afaa6a8f0a31c12e6f9354"
 };
 let fbAuth=null, fbDb=null, cloudUid=null, cloudReady=false, firebaseConfigured=false;
 let authReadyResolve; const authReadyPromise=new Promise(r=>authReadyResolve=r);
-
-let bookSessionId=0;
-let cloudSyncInFlight=0;
-let renderSequence=0;
-const CHUNK_SIZE = 600 * 1024;
-const MAX_COVER_BYTES = 200 * 1024;
+let bookSessionId=0, cloudSyncInFlight=0, renderSequence=0;
+const CHUNK_SIZE = 600 * 1024; const MAX_COVER_BYTES = 200 * 1024;
 
 (function initFirebase(){
   if(!firebaseConfig.apiKey || firebaseConfig.apiKey.indexOf('TU_')===0){ authReadyResolve(); return; }
   try{
-    firebase.initializeApp(firebaseConfig);
-    fbAuth=firebase.auth();
-    fbDb=firebase.firestore();
-    
-    // Activar modo offline de Firebase
-    fbDb.enablePersistence().catch(err => console.warn('Modo offline no soportado:', err));
-    
-    firebaseConfigured=true;
-    $('#signInBtn').style.display='inline-block';
+    firebase.initializeApp(firebaseConfig); fbAuth=firebase.auth(); fbDb=firebase.firestore();
+    fbDb.enablePersistence().catch(e=>{}); firebaseConfigured=true; $('#signInBtn').style.display='inline-block';
     let first=true;
     fbAuth.onAuthStateChanged(async user=>{
-      cloudUid=user?user.uid:null;
-      cloudReady=!!cloudUid;
+      cloudUid=user?user.uid:null; cloudReady=!!cloudUid;
       $('#syncBadge').textContent = cloudReady ? 'Sincronizado ☁ ('+(user.displayName||user.email||'Cuenta')+')' : '';
       $('#signInBtn').textContent = cloudReady ? 'Cerrar sesión' : 'Iniciar sesión con Google';
       if(first){ first=false; authReadyResolve(); }
       if(cloudReady){
-        try{
-          const snap=await fbDb.doc('users/'+cloudUid).get();
-          if(snap.exists && snap.data().stats){ saveJSON('epubStats', snap.data().stats); }
-        }catch(e){ console.error('FIREBASE stats read ERROR:', e); }
+        try{ const snap=await fbDb.doc('users/'+cloudUid).get(); if(snap.exists && snap.data().stats){ saveJSON('epubStats', snap.data().stats); } }catch(e){}
         if(bookId) syncCurrentBookFromCloud().catch(e=>{});
         if(pagesHost.style.display==='none') loadLibrary();
-      }else{
-        if(pagesHost.style.display==='none') loadLibrary();
-      }
+      }else{ if(pagesHost.style.display==='none') loadLibrary(); }
     });
-  }catch(e){
-    console.error('FIREBASE initialization ERROR:', e);
-    authReadyResolve();
-  }
+  }catch(e){ authReadyResolve(); }
 })();
 
 function handleSignIn(){
-  if(!firebaseConfigured){ alert('Firebase no está configurado.'); return; }
+  if(!firebaseConfigured){ alert('Firebase no configurado.'); return; }
   if(cloudReady){ fbAuth.signOut(); return; }
   fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e=>{});
 }
-$('#signInBtn').onclick=handleSignIn;
-$('#signInLibBtn').onclick=handleSignIn;
+$('#signInBtn').onclick=handleSignIn; $('#signInLibBtn').onclick=handleSignIn;
 
-function pushStats(){ if(!cloudReady) return; try{ fbDb.doc('users/'+cloudUid).set({stats:getStats()}, {merge:true}).catch(()=>{}); }catch(e){} }
-
+function pushStats(){ if(!cloudReady) return; try{ fbDb.doc('users/'+cloudUid).set({stats:getStats()}, {merge:true}).catch(e=>{}); }catch(e){} }
 function pushBookState(){
   if(!cloudReady || !bookId) return;
-  const syncBookId=bookId, syncUid=cloudUid;
-  const data={ currentIndex, highlights, pageIndex: currentPage, updatedAt: Date.now() };
-  try{
-    fbDb.doc('users/'+syncUid+'/books/'+syncBookId).set(data, {merge:true}).catch(e=>{});
-  }catch(e){}
+  try{ fbDb.doc('users/'+cloudUid+'/books/'+bookId).set({ currentIndex, highlights, pageIndex: currentPage, updatedAt: Date.now() }, {merge:true}).catch(e=>{}); }catch(e){}
 }
-
 async function pullBookState(bookIdOverride=bookId, uidOverride=cloudUid){
   if(!cloudReady || !bookIdOverride || !uidOverride) return null;
-  try{
-    const snap=await fbDb.doc('users/'+uidOverride+'/books/'+bookIdOverride).get();
-    return snap.exists?snap.data():null;
-  }catch(e){ return null; }
+  try{ const snap=await fbDb.doc('users/'+uidOverride+'/books/'+bookIdOverride).get(); return snap.exists?snap.data():null; }catch(e){ return null; }
 }
 
 async function syncCurrentBookFromCloud(){
   if(!cloudReady || !bookId || !spine.length) return;
-  const syncId=++cloudSyncInFlight;
-  const syncBookId=bookId, syncUid=cloudUid;
-  const syncSession=bookSessionId, syncIndex=currentIndex;
-
+  const syncId=++cloudSyncInFlight; const syncBookId=bookId, syncUid=cloudUid; const syncSession=bookSessionId, syncIndex=currentIndex;
   const remote=await pullBookState(syncBookId, syncUid);
   if(syncId!==cloudSyncInFlight || syncBookId!==bookId || syncUid!==cloudUid || syncSession!==bookSessionId) return;
-
   if(remote){
-    const remoteHighlights=Array.isArray(remote.highlights)?remote.highlights:[];
-    highlights=remoteHighlights;
-    saveJSON('epubHl_'+bookId, highlights);
-
+    highlights=Array.isArray(remote.highlights)?remote.highlights:[]; saveJSON('epubHl_'+bookId, highlights);
     const remoteIndex=typeof remote.currentIndex==='number' ? Math.max(0, Math.min(remote.currentIndex, spine.length-1)) : 0;
     const remotePage=typeof remote.pageIndex==='number' ? remote.pageIndex : 0;
-    const userNavigated=(currentIndex!==syncIndex);
-
-    if(!userNavigated){
-      saveJSON('epubProg_'+bookId, {index: remoteIndex, pageIndex: remotePage});
-      pageRestoreTarget = remotePage;
-      await renderChapter(remoteIndex);
-    }else{
-      renderHlist();
-      applyHighlights();
-    }
-  }else{
-    pushBookState();
-  }
+    if(currentIndex===syncIndex){ saveJSON('epubProg_'+bookId, {index: remoteIndex, pageIndex: remotePage}); pageRestoreTarget = remotePage; await renderChapter(remoteIndex); }
+    else { renderHlist(); applyHighlights(); }
+  }else{ pushBookState(); }
 }
 
-function arrayBufferToBase64(buf){
-  let binary=''; const bytes=new Uint8Array(buf); const CH=0x8000;
-  for(let i=0;i<bytes.length;i+=CH){ binary+=String.fromCharCode.apply(null, bytes.subarray(i, i+CH)); }
-  return btoa(binary);
-}
-function base64ToArrayBuffer(b64){
-  const binary=atob(b64); const len=binary.length; const bytes=new Uint8Array(len);
-  for(let i=0;i<len;i++) bytes[i]=binary.charCodeAt(i);
-  return bytes.buffer;
-}
+function arrayBufferToBase64(buf){ let binary=''; const bytes=new Uint8Array(buf); const CH=0x8000; for(let i=0;i<bytes.length;i+=CH){ binary+=String.fromCharCode.apply(null, bytes.subarray(i, i+CH)); } return btoa(binary); }
+function base64ToArrayBuffer(b64){ const binary=atob(b64); const len=binary.length; const bytes=new Uint8Array(len); for(let i=0;i<len;i++) bytes[i]=binary.charCodeAt(i); return bytes.buffer; }
 
 async function uploadBookToCloud(buf, meta){
   if(!cloudReady || !fbDb) return;
-  const docRef=fbDb.doc('users/'+cloudUid+'/books/'+meta.bookId);
-  const existing=await docRef.get();
-  if(existing.exists && existing.data().chunks){
-    await docRef.set({ title: meta.title, author: meta.author, totalChapters: meta.totalChapters||0, cover: meta.cover||'' }, {merge:true});
-    return;
-  }
-
-  const totalChunks=Math.ceil(buf.byteLength / CHUNK_SIZE);
-  showLoading('Subiendo a la nube… 0 / '+totalChunks, true);
-
-  await docRef.set({
-    bookId: meta.bookId, title: meta.title, author: meta.author,
-    totalChapters: meta.totalChapters||0, chunks: totalChunks, size: buf.byteLength,
-    addedAt: Date.now(), currentIndex: 0, highlights: [], pageIndex: 0, cover: meta.cover||''
-  }, {merge:true});
-
+  const docRef=fbDb.doc('users/'+cloudUid+'/books/'+meta.bookId); const existing=await docRef.get();
+  if(existing.exists && existing.data().chunks){ await docRef.set({ title: meta.title, author: meta.author, totalChapters: meta.totalChapters||0, cover: meta.cover||'' }, {merge:true}); return; }
+  const totalChunks=Math.ceil(buf.byteLength / CHUNK_SIZE); showLoading('Subiendo a la nube… 0 / '+totalChunks, true);
+  await docRef.set({ bookId: meta.bookId, title: meta.title, author: meta.author, totalChapters: meta.totalChapters||0, chunks: totalChunks, size: buf.byteLength, addedAt: Date.now(), currentIndex: 0, highlights: [], pageIndex: 0, cover: meta.cover||'' }, {merge:true});
   const chunksCol=docRef.collection('chunks');
   for(let i=0;i<totalChunks;i++){
-    const slice=buf.slice(i*CHUNK_SIZE, Math.min((i+1)*CHUNK_SIZE, buf.byteLength));
-    await chunksCol.doc(String(i)).set({ data: arrayBufferToBase64(slice) });
-    setLoadingProgress(Math.round((i+1)/totalChunks*100));
-    loadingTextEl.textContent='Subiendo a la nube… '+(i+1)+' / '+totalChunks;
+    await chunksCol.doc(String(i)).set({ data: arrayBufferToBase64(buf.slice(i*CHUNK_SIZE, Math.min((i+1)*CHUNK_SIZE, buf.byteLength))) });
+    setLoadingProgress(Math.round((i+1)/totalChunks*100)); loadingTextEl.textContent='Subiendo a la nube… '+(i+1)+' / '+totalChunks;
   }
   hideLoading();
 }
 
 async function downloadBookFromCloud(bookIdToLoad){
   if(!cloudReady) throw new Error('No hay sesión en la nube.');
-  const docRef=fbDb.doc('users/'+cloudUid+'/books/'+bookIdToLoad);
-  const snap=await docRef.get();
-  if(!snap.exists) throw new Error('Libro no encontrado en la nube.');
-  const meta=snap.data();
-  const totalChunks=meta.chunks||0;
-  if(!totalChunks) throw new Error('Este libro no tiene archivo guardado en la nube.');
-
-  const chunksCol=docRef.collection('chunks');
-  const parts=[];
+  const docRef=fbDb.doc('users/'+cloudUid+'/books/'+bookIdToLoad); const snap=await docRef.get();
+  if(!snap.exists) throw new Error('Libro no encontrado.');
+  const meta=snap.data(); const totalChunks=meta.chunks||0; if(!totalChunks) throw new Error('Sin archivo.');
+  const chunksCol=docRef.collection('chunks'); const parts=[];
   for(let i=0;i<totalChunks;i++){
-    const cs=await chunksCol.doc(String(i)).get();
-    if(!cs.exists) throw new Error('Falta el fragmento '+i+' del libro.');
-    parts.push(base64ToArrayBuffer(cs.data().data));
-    setLoadingProgress(Math.round((i+1)/totalChunks*100));
-    loadingTextEl.textContent='Descargando libro… '+(i+1)+' / '+totalChunks;
+    const cs=await chunksCol.doc(String(i)).get(); if(!cs.exists) throw new Error('Falta fragmento.');
+    parts.push(base64ToArrayBuffer(cs.data().data)); setLoadingProgress(Math.round((i+1)/totalChunks*100)); loadingTextEl.textContent='Descargando… '+(i+1)+' / '+totalChunks;
   }
-  let total=0; parts.forEach(p=>total+=p.byteLength);
-  const out=new Uint8Array(total);
-  let off=0; parts.forEach(p=>{ out.set(new Uint8Array(p), off); off+=p.byteLength; });
+  let total=0; parts.forEach(p=>total+=p.byteLength); const out=new Uint8Array(total); let off=0;
+  parts.forEach(p=>{ out.set(new Uint8Array(p), off); off+=p.byteLength; });
   return { buf: out.buffer, meta };
 }
 
-// ---------- Biblioteca ----------
 async function loadLibrary(){
   if(!firebaseConfigured){ renderLibraryError('Firebase no configurado.'); return; }
-  if(!cloudReady){ renderLibraryError('Inicia sesión con Google para ver tu biblioteca en la nube.'); return; }
+  if(!cloudReady){ renderLibraryError('Inicia sesión con Google.'); return; }
   libraryListEl.innerHTML='<div class="lib-empty">Cargando biblioteca…</div>';
-  try{
-    const snap=await fbDb.collection('users/'+cloudUid+'/books').orderBy('addedAt','desc').get();
-    renderLibrary(snap.docs.map(d=>({id:d.id, ...d.data()})));
-  }catch(e){
-    console.error('loadLibrary ERROR:', e);
-    renderLibraryError('Revisa tu conexión. ' + (e.message||e));
-  }
+  try{ const snap=await fbDb.collection('users/'+cloudUid+'/books').orderBy('addedAt','desc').get(); renderLibrary(snap.docs.map(d=>({id:d.id, ...d.data()}))); }
+  catch(e){ renderLibraryError('Revisa tu conexión.'); }
 }
-
-function renderLibraryError(msg){
-  libraryListEl.innerHTML='<div class="lib-empty">'+escapeHtml(msg)+'</div>';
-  libActionsEl.style.display='flex';
-  $('#signInLibBtn').style.display = cloudReady ? 'none' : 'inline-block';
-}
+function renderLibraryError(msg){ libraryListEl.innerHTML='<div class="lib-empty">'+escapeHtml(msg)+'</div>'; libActionsEl.style.display='flex'; $('#signInLibBtn').style.display=cloudReady?'none':'inline-block'; }
 
 function renderLibrary(list){
-  libActionsEl.style.display='flex';
-  $('#signInLibBtn').style.display='none';
+  libActionsEl.style.display='flex'; $('#signInLibBtn').style.display='none';
   if(!list.length){ libraryListEl.innerHTML='<div class="lib-empty">Aún no tienes libros. Añade uno.</div>'; return; }
   libraryListEl.innerHTML='';
   list.forEach(b=>{
     const card=document.createElement('div'); card.className='lib-card';
     const total=b.totalChapters||0; const idx=b.currentIndex||0;
     const coverHtml = b.cover ? '<div class="cover"><img src="'+b.cover+'" alt=""></div>' : '<div class="cover">'+escapeHtml((b.title||'?').trim().charAt(0).toUpperCase())+'</div>';
-    card.innerHTML= coverHtml+
-      '<div class="info"><h3>'+escapeHtml(b.title||'Sin título')+'</h3><p>'+escapeHtml(b.author||'')+'</p>'+
-      '<div class="prog">'+(total?('Capítulo '+(idx+1)+' de '+total):'')+'</div></div>'+
-      '<button class="del" title="Eliminar de la nube">✕</button>';
-    const openFn=()=>openCloudBook(b);
-    card.querySelector('.info').onclick=openFn; card.querySelector('.cover').onclick=openFn;
-    card.querySelector('.del').onclick=async ev=>{
-      ev.stopPropagation();
-      if(!confirm('¿Eliminar "'+(b.title||'este libro')+'"?')) return;
-      try{
-        const chunksCol=fbDb.collection('users/'+cloudUid+'/books/'+b.id+'/chunks');
-        const cs=await chunksCol.get();
-        const batch=fbDb.batch();
-        cs.docs.forEach(d=>batch.delete(d.ref));
-        batch.delete(fbDb.doc('users/'+cloudUid+'/books/'+b.id));
-        await batch.commit();
-        try{ localStorage.removeItem('epubHl_'+b.id); localStorage.removeItem('epubProg_'+b.id); }catch(e){}
-        loadLibrary();
-      }catch(e){ alert('Error: '+e); }
-    };
+    card.innerHTML= coverHtml+'<div class="info"><h3>'+escapeHtml(b.title||'Sin título')+'</h3><p>'+escapeHtml(b.author||'')+'</p><div class="prog">'+(total?('Capítulo '+(idx+1)+' de '+total):'')+'</div></div><button class="del" title="Eliminar">✕</button>';
+    const openFn=()=>openCloudBook(b); card.querySelector('.info').onclick=openFn; card.querySelector('.cover').onclick=openFn;
+    card.querySelector('.del').onclick=async ev=>{ ev.stopPropagation(); if(!confirm('¿Eliminar?')) return; try{ const cs=await fbDb.collection('users/'+cloudUid+'/books/'+b.id+'/chunks').get(); const batch=fbDb.batch(); cs.docs.forEach(d=>batch.delete(d.ref)); batch.delete(fbDb.doc('users/'+cloudUid+'/books/'+b.id)); await batch.commit(); loadLibrary(); }catch(e){} };
     libraryListEl.appendChild(card);
   });
 }
@@ -547,53 +429,25 @@ function renderLibrary(list){
 async function openCloudBook(meta) {
   showLoading('Abriendo "' + (meta.title || 'libro') + '"…', true);
   try {
-    let buf = await getBookFromIDB(meta.id);
-    let fullMeta = meta;
-    
+    let buf = await getBookFromIDB(meta.id); let fullMeta = meta;
     if (!buf) {
       if (!navigator.onLine) throw new Error('Libro no guardado localmente y no hay internet.');
-      const downloaded = await downloadBookFromCloud(meta.id);
-      buf = downloaded.buf;
-      fullMeta = downloaded.meta;
-      await saveBookToIDB(meta.id, buf); 
+      const dl = await downloadBookFromCloud(meta.id); buf = dl.buf; fullMeta = dl.meta; await saveBookToIDB(meta.id, buf); 
     }
-
     if (Array.isArray(fullMeta.highlights)) saveJSON('epubHl_' + meta.id, fullMeta.highlights);
-    if (typeof fullMeta.currentIndex === 'number') {
-      saveJSON('epubProg_' + meta.id, {
-        index: fullMeta.currentIndex,
-        pageIndex: typeof fullMeta.pageIndex === 'number' ? fullMeta.pageIndex : 0
-      });
-    }
-    hideLoading();
-    await loadEpub(buf);
-  } catch (e) {
-    hideLoading();
-    console.error('openCloudBook ERROR:', e);
-    alert('No se pudo abrir el libro: ' + (e.message || e));
-  }
+    if (typeof fullMeta.currentIndex === 'number') saveJSON('epubProg_' + meta.id, { index: fullMeta.currentIndex, pageIndex: typeof fullMeta.pageIndex === 'number' ? fullMeta.pageIndex : 0 });
+    hideLoading(); await loadEpub(buf);
+  } catch (e) { hideLoading(); alert('Error: ' + e.message); }
 }
 
-// === COMPORTAMIENTO TÁCTIL MENÚ ===
-$('#menuBtn').onclick = (e) => {
-  e.stopPropagation();
-  $('#side').classList.toggle('open');
-};
-$('.main').addEventListener('pointerdown', () => {
-  if ($('#side').classList.contains('open')) {
-    $('#side').classList.remove('open');
-  }
-});
-
+$('#menuBtn').onclick = (e) => { e.stopPropagation(); $('#side').classList.toggle('open'); };
+$('.main').addEventListener('pointerdown', () => { if ($('#side').classList.contains('open')) $('#side').classList.remove('open'); });
 $('#themeBtn').onclick=()=>{ themeIdx=(themeIdx+1)%themes.length; document.documentElement.setAttribute('data-theme', themes[themeIdx]); };
 $('#fontUp').onclick=()=>{ fontIdx=Math.min(fontIdx+1,fontSizes.length-1); applyFont(); repaginate(); };
 $('#fontDown').onclick=()=>{ fontIdx=Math.max(fontIdx-1,0); applyFont(); repaginate(); };
 function applyFont(){ document.documentElement.style.setProperty('--fs', fontSizes[fontIdx]+'px'); }
 $('#tabToc').onclick=()=>switchTab('toc'); $('#tabHl').onclick=()=>switchTab('hl');
-function switchTab(t){
-  tocEl.classList.toggle('show', t==='toc'); hlistEl.classList.toggle('show', t==='hl');
-  $('#tabToc').classList.toggle('active', t==='toc'); $('#tabHl').classList.toggle('active', t==='hl');
-}
+function switchTab(t){ tocEl.classList.toggle('show', t==='toc'); hlistEl.classList.toggle('show', t==='hl'); $('#tabToc').classList.toggle('active', t==='toc'); $('#tabHl').classList.toggle('active', t==='hl'); }
 
 function resolvePath(base, rel){
   if(rel.startsWith('/')) return rel.slice(1);
@@ -601,43 +455,24 @@ function resolvePath(base, rel){
   for(const p of rel.split('/')){ if(p==='..') baseParts.pop(); else if(p!=='.') baseParts.push(p); }
   return baseParts.join('/');
 }
-async function findFile(path){
-  let f=zip.file(path);
-  if(!f){ const c=path.split('#')[0]; f=zip.file(c)||zip.file(decodeURIComponent(c)); }
-  return f;
-}
+async function findFile(path){ let f=zip.file(path); if(!f){ const c=path.split('#')[0]; f=zip.file(c)||zip.file(decodeURIComponent(c)); } return f; }
 function plainText(html){ const d=document.createElement('div'); d.innerHTML=html; return (d.textContent||'').replace(/\s+/g,' ').trim(); }
 function wordCount(txt){ return txt ? txt.split(' ').filter(Boolean).length : 0; }
 
 async function extractCover(opfDoc, manifest){
   try{
-    const metaCover=opfDoc.querySelector('metadata > meta[name="cover"]');
-    let coverId=metaCover?metaCover.getAttribute('content'):null;
-    if(!coverId){ const item=opfDoc.querySelector('manifest > item[properties~="cover-image"]'); if(item) coverId=item.getAttribute('id'); }
-    if(coverId && manifest[coverId]){
-      const f=await findFile(manifest[coverId].href);
-      if(f){ const blob=await f.async('blob'); const dataUrl=await blobToDataURL(blob, MAX_COVER_BYTES); if(dataUrl) return dataUrl; }
-    }
-  }catch(e){}
-  return '';
+    let coverId=opfDoc.querySelector('metadata > meta[name="cover"]')?.getAttribute('content');
+    if(!coverId) coverId=opfDoc.querySelector('manifest > item[properties~="cover-image"]')?.getAttribute('id');
+    if(coverId && manifest[coverId]){ const f=await findFile(manifest[coverId].href); if(f){ const blob=await f.async('blob'); return await blobToDataURL(blob, MAX_COVER_BYTES) || ''; } }
+  }catch(e){} return '';
 }
 function blobToDataURL(blob, maxBytes){
-  return new Promise(resolve=>{
-    const reader=new FileReader();
-    reader.onload=()=>{
-      const dataUrl=reader.result;
-      if(dataUrl.length < maxBytes*1.37){ resolve(dataUrl); return; }
-      const img=new Image();
-      img.onload=()=>{
-        const maxW=300, maxH=400; let w=img.width, h=img.height;
-        const ratio=Math.min(maxW/w, maxH/h, 1); w=Math.round(w*ratio); h=Math.round(h*ratio);
-        const canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h;
-        const ctx=canvas.getContext('2d'); ctx.drawImage(img, 0, 0, w, h);
-        try{ resolve(canvas.toDataURL('image/jpeg', 0.8)); } catch(e){ resolve(dataUrl); }
-      };
-      img.onerror=()=>resolve(dataUrl); img.src=dataUrl;
-    };
-    reader.onerror=()=>resolve(''); reader.readAsDataURL(blob);
+  return new Promise(res=>{
+    const r=new FileReader();
+    r.onload=()=>{
+      const d=r.result; if(d.length < maxBytes*1.37) return res(d);
+      const img=new Image(); img.onload=()=>{ const maxW=300, maxH=400; const ratio=Math.min(maxW/img.width, maxH/img.height, 1); const cvs=document.createElement('canvas'); cvs.width=Math.round(img.width*ratio); cvs.height=Math.round(img.height*ratio); cvs.getContext('2d').drawImage(img, 0, 0, cvs.width, cvs.height); try{ res(cvs.toDataURL('image/jpeg', 0.8)); }catch(e){ res(d); } }; img.onerror=()=>res(d); img.src=d;
+    }; r.onerror=()=>res(''); r.readAsDataURL(blob);
   });
 }
 
@@ -645,75 +480,31 @@ async function loadEpub(arrayBuffer){
   showLoading('Abriendo EPUB…', false);
   try{
     zip=await JSZip.loadAsync(arrayBuffer);
-    const containerXml=await zip.file('META-INF/container.xml').async('string');
-    const containerDoc=new DOMParser().parseFromString(containerXml,'application/xml');
-    const opfPath=containerDoc.querySelector('rootfile').getAttribute('full-path');
-    opfDir=opfPath.includes('/')?opfPath.slice(0,opfPath.lastIndexOf('/')+1):'';
-    const opfXml=await zip.file(opfPath).async('string');
-    const opfDoc=new DOMParser().parseFromString(opfXml,'application/xml');
-    const title=opfDoc.querySelector('metadata > title')?.textContent||'Libro sin título';
-    const author=opfDoc.querySelector('metadata > creator')?.textContent||'';
+    const containerDoc=new DOMParser().parseFromString(await zip.file('META-INF/container.xml').async('string'),'application/xml');
+    const opfPath=containerDoc.querySelector('rootfile').getAttribute('full-path'); opfDir=opfPath.includes('/')?opfPath.slice(0,opfPath.lastIndexOf('/')+1):'';
+    const opfDoc=new DOMParser().parseFromString(await zip.file(opfPath).async('string'),'application/xml');
+    const title=opfDoc.querySelector('metadata > title')?.textContent||'Libro sin título', author=opfDoc.querySelector('metadata > creator')?.textContent||'';
     $('#bookTitle').textContent=title; $('#bookAuthor').textContent=author;
     bookId=btoa(unescape(encodeURIComponent(title+'::'+author))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'').slice(0,40);
 
-    const manifest={};
-    opfDoc.querySelectorAll('manifest > item').forEach(item=>{
-      manifest[item.getAttribute('id')]={href:opfDir+item.getAttribute('href'), mediaType:item.getAttribute('media-type')};
-    });
-    spine=[];
-    opfDoc.querySelectorAll('spine > itemref').forEach(ref=>{
-      const idref=ref.getAttribute('idref'); if(manifest[idref]) spine.push(manifest[idref].href);
-    });
+    const manifest={}; opfDoc.querySelectorAll('manifest > item').forEach(i=>manifest[i.getAttribute('id')]={href:opfDir+i.getAttribute('href'), mediaType:i.getAttribute('media-type')});
+    spine=[]; opfDoc.querySelectorAll('spine > itemref').forEach(r=>{ const idref=r.getAttribute('idref'); if(manifest[idref]) spine.push(manifest[idref].href); });
 
     tocItems=[];
-    const navItem=Object.values(manifest).find(m=>m.mediaType==='application/xhtml+xml'&&m.href.match(/nav\.xhtml$/i));
-    const ncxItem=Object.values(manifest).find(m=>m.mediaType==='application/x-dtbncx+xml');
+    const navItem=Object.values(manifest).find(m=>m.mediaType==='application/xhtml+xml'&&m.href.match(/nav\.xhtml$/i)), ncxItem=Object.values(manifest).find(m=>m.mediaType==='application/x-dtbncx+xml');
     try{
-      if(navItem){
-        const navXml=await zip.file(navItem.href).async('string');
-        const navDoc=new DOMParser().parseFromString(navXml,'text/html');
-        navDoc.querySelectorAll('nav a').forEach(a=>{
-          tocItems.push({label:a.textContent.trim()||'—', href:resolvePath(navItem.href, a.getAttribute('href')||'')});
-        });
-      } else if(ncxItem){
-        const ncxXml=await zip.file(ncxItem.href).async('string');
-        const ncxDoc=new DOMParser().parseFromString(ncxXml,'application/xml');
-        ncxDoc.querySelectorAll('navPoint').forEach(np=>{
-          const label=np.querySelector('navLabel > text')?.textContent.trim()||'—';
-          const src=np.querySelector('content')?.getAttribute('src')||'';
-          tocItems.push({label, href:resolvePath(ncxItem.href, src)});
-        });
-      }
-    }catch(e){}
-    if(tocItems.length===0) tocItems=spine.map((h,i)=>({label:'Capítulo '+(i+1), href:h}));
+      if(navItem){ const d=new DOMParser().parseFromString(await zip.file(navItem.href).async('string'),'text/html'); d.querySelectorAll('nav a').forEach(a=>tocItems.push({label:a.textContent.trim()||'—', href:resolvePath(navItem.href, a.getAttribute('href')||'')})); }
+      else if(ncxItem){ const d=new DOMParser().parseFromString(await zip.file(ncxItem.href).async('string'),'application/xml'); d.querySelectorAll('navPoint').forEach(np=>tocItems.push({label:np.querySelector('navLabel > text')?.textContent.trim()||'—', href:resolvePath(ncxItem.href, np.querySelector('content')?.getAttribute('src')||'')})); }
+    }catch(e){} if(tocItems.length===0) tocItems=spine.map((h,i)=>({label:'Capítulo '+(i+1), href:h}));
 
-    buildTocUI();
-    const thisSession=++bookSessionId;
-    bookCoverDataUrl=await extractCover(opfDoc, manifest);
+    buildTocUI(); const thisSession=++bookSessionId; bookCoverDataUrl=await extractCover(opfDoc, manifest);
+    highlights=loadJSON('epubHl_'+bookId, []); const prog=loadJSON('epubProg_'+bookId, {index:0, pageIndex:0}); pageRestoreTarget = (prog.pageIndex && prog.pageIndex>0) ? prog.pageIndex : 0;
 
-    highlights=loadJSON('epubHl_'+bookId, []);
-    const prog=loadJSON('epubProg_'+bookId, {index:0, pageIndex:0});
-    pageRestoreTarget = (prog.pageIndex && prog.pageIndex>0) ? prog.pageIndex : 0;
+    emptyEl.style.display='none'; pagesHost.style.display='block'; navFoot.style.display='flex'; $('#libBtn').style.display='inline-block';
+    applyFont(); await renderChapter(prog.index||0); hideLoading(); computeWordCounts();
 
-    emptyEl.style.display='none';
-    pagesHost.style.display='block';
-    navFoot.style.display='flex';
-    $('#libBtn').style.display='inline-block';
-
-    applyFont();
-    await renderChapter(prog.index||0);
-    hideLoading();
-    computeWordCounts();
-
-    if(cloudReady){
-      uploadBookToCloud(arrayBuffer, { bookId, title, author, totalChapters: spine.length, cover: bookCoverDataUrl }).catch(e=>{});
-    }else if(firebaseConfigured){
-      authReadyPromise.then(()=>{
-        if(cloudReady && bookId){
-          uploadBookToCloud(arrayBuffer, { bookId, title, author, totalChapters: spine.length, cover: bookCoverDataUrl }).catch(e=>{});
-        }
-      });
-    }
+    if(cloudReady){ uploadBookToCloud(arrayBuffer, { bookId, title, author, totalChapters: spine.length, cover: bookCoverDataUrl }).catch(e=>{}); }
+    else if(firebaseConfigured){ authReadyPromise.then(()=>{ if(cloudReady && bookId) uploadBookToCloud(arrayBuffer, { bookId, title, author, totalChapters: spine.length, cover: bookCoverDataUrl }).catch(e=>{}); }); }
     if(cloudReady && thisSession===bookSessionId) syncCurrentBookFromCloud().catch(e=>{});
   }catch(err){ hideLoading(); throw err; }
 }
@@ -729,17 +520,13 @@ function buildTocUI(){
 
 async function computeWordCounts(){
   wordCounts=new Array(spine.length).fill(0); totalBookWords=0;
-  for(let i=0;i<spine.length;i++){
-    try{ const f=await findFile(spine[i]); if(f){ const html=await f.async('string'); const wc=wordCount(plainText(html)); wordCounts[i]=wc; totalBookWords+=wc; } }catch(e){}
-  }
+  for(let i=0;i<spine.length;i++){ try{ const f=await findFile(spine[i]); if(f){ const html=await f.async('string'); const wc=wordCount(plainText(html)); wordCounts[i]=wc; totalBookWords+=wc; } }catch(e){} }
   updateTimeEstimate();
 }
 
 function wordsReadSoFar(){
   let sum=0; for(let i=0;i<currentIndex;i++) sum+=wordCounts[i]||0;
-  const frac = totalPages>1 ? (currentPage/(totalPages-1)) : 0;
-  sum += (wordCounts[currentIndex]||0)*frac;
-  return sum;
+  return sum + (wordCounts[currentIndex]||0)*(totalPages>1 ? (currentPage/(totalPages-1)) : 0);
 }
 function updateTimeEstimate(){
   if(!totalBookWords){ timeLeftEl.textContent=''; return; }
@@ -748,77 +535,89 @@ function updateTimeEstimate(){
   timeLeftEl.textContent = mins<1 ? 'Casi terminas' : mins<60 ? ('≈ '+mins+' min') : ('≈ '+Math.floor(mins/60)+'h '+(mins%60)+'m');
 }
 
-function goTo(i){
-  if(i<0 || i>=spine.length) return;
-  finishChapterTiming(); pageRestoreTarget=0; pendingGoLastPage=false; renderChapter(i);
-}
-
-function nextPage(){
-  if(currentPage < totalPages-1){
-    currentPage++; showPage(currentPage); pushBookState(); updatePageUI();
-  }else if(currentIndex < spine.length-1){ goTo(currentIndex+1); }
-}
-function prevPage(){
-  if(currentPage > 0){
-    currentPage--; showPage(currentPage); pushBookState(); updatePageUI();
-  }else if(currentIndex > 0){ pendingGoLastPage=true; goTo(currentIndex-1); }
-}
+function goTo(i){ if(i<0 || i>=spine.length) return; finishChapterTiming(); pageRestoreTarget=0; pendingGoLastPage=false; renderChapter(i); }
+function nextPage(){ if(currentPage < totalPages-1){ currentPage++; showPage(currentPage); pushBookState(); updatePageUI(); }else if(currentIndex < spine.length-1){ goTo(currentIndex+1); } }
+function prevPage(){ if(currentPage > 0){ currentPage--; showPage(currentPage); pushBookState(); updatePageUI(); }else if(currentIndex > 0){ pendingGoLastPage=true; goTo(currentIndex-1); } }
 prevBtn.onclick=prevPage; nextBtn.onclick=nextPage;
 document.addEventListener('keydown', e=>{ if(e.key==='ArrowRight') nextPage(); if(e.key==='ArrowLeft') prevPage(); });
 window.addEventListener('beforeunload', ()=>{ finishChapterTiming(); pushBookState(); });
-function finishChapterTiming(){
-  if(!spine.length) return;
-  const ms = activeMs + (hidden?0:(Date.now()-chapterStart));
-  recordSession(wordCounts[currentIndex]||0, ms/60000); activeMs=0;
-}
+function finishChapterTiming(){ if(!spine.length) return; recordSession(wordCounts[currentIndex]||0, (activeMs + (hidden?0:(Date.now()-chapterStart)))/60000); activeMs=0; }
 
 function showPage(i){
   const container = pagesHost.querySelector('.page-container');
-  if(container) {
-     const contentWidth = pagesHost.clientWidth;
-     container.style.transform = `translateX(-${i * contentWidth}px)`;
-  }
+  if(container) container.style.transform = `translateX(-${i * pagesHost.clientWidth}px)`;
 }
 function updatePageUI(){
-  pageIndicatorEl.textContent = 'Pág. '+(currentPage+1)+' / '+totalPages;
-  chapterProgressEl.textContent = 'Cap. '+(currentIndex+1)+' / '+spine.length;
-  prevBtn.disabled = (currentIndex===0 && currentPage===0);
-  nextBtn.disabled = (currentIndex===spine.length-1 && currentPage===totalPages-1);
+  pageIndicatorEl.textContent = 'Pág. '+(currentPage+1)+' / '+totalPages; chapterProgressEl.textContent = 'Cap. '+(currentIndex+1)+' / '+spine.length;
+  prevBtn.disabled = (currentIndex===0 && currentPage===0); nextBtn.disabled = (currentIndex===spine.length-1 && currentPage===totalPages-1);
 }
 
 let repaginateTimer=null;
 function repaginate(){
-  if(!spine.length) return;
-  clearTimeout(repaginateTimer);
-  repaginateTimer=setTimeout(()=>{
-    const frac = totalPages>1 ? currentPage/(totalPages-1) : 0;
-    pageRestoreTarget=0;
-    renderChapter(currentIndex).then(()=>{
-      currentPage=Math.round(frac*(totalPages-1));
-      showPage(currentPage);
-      updatePageUI();
-    });
-  }, 250);
+  if(!spine.length) return; clearTimeout(repaginateTimer);
+  repaginateTimer=setTimeout(()=>{ const frac = totalPages>1 ? currentPage/(totalPages-1) : 0; pageRestoreTarget=0; renderChapter(currentIndex).then(()=>{ currentPage=Math.round(frac*(totalPages-1)); showPage(currentPage); updatePageUI(); }); }, 250);
 }
 window.addEventListener('resize', repaginate);
 
+// === NUEVO: FUNCIONES DE ENLACES ===
+function getAnchorPage(anchor) {
+  if(!anchor) return -1;
+  const container = pagesHost.querySelector('.page-container');
+  if(!container) return -1;
+  try {
+    const el = container.querySelector(`[id="${anchor}"], [name="${anchor}"]`);
+    if (el) {
+      const oldT = container.style.transform; container.style.transform = 'none';
+      const relX = el.getBoundingClientRect().left - pagesHost.getBoundingClientRect().left;
+      container.style.transform = oldT;
+      return Math.max(0, Math.floor(relX / pagesHost.clientWidth));
+    }
+  } catch(e){}
+  return -1;
+}
+
+pagesHost.addEventListener('click', e => {
+  const a = e.target.closest('a');
+  if (a && a.getAttribute('href')) {
+    e.preventDefault();
+    const href = a.getAttribute('href');
+    if (href.match(/^https?:\/\//i)) { window.open(href, '_blank'); return; }
+
+    linkHistory.push({ index: currentIndex, page: currentPage });
+    $('#backLinkBtn').style.display = 'inline-block';
+
+    const resolved = resolvePath(spine[currentIndex], href);
+    const [pathPart, hashPart] = resolved.split('#');
+    let targetIndex = spine.findIndex(s => s.split('#')[0] === pathPart);
+    if (targetIndex === -1 && !pathPart) targetIndex = currentIndex;
+
+    if (targetIndex >= 0 && targetIndex < spine.length) {
+      if (targetIndex !== currentIndex) {
+        pendingAnchor = hashPart; pageRestoreTarget = 0; renderChapter(targetIndex);
+      } else if (hashPart) {
+        const p = getAnchorPage(hashPart);
+        if (p !== -1) { currentPage = Math.min(p, totalPages - 1); showPage(currentPage); updatePageUI(); pushBookState(); }
+      }
+    }
+  }
+});
+
+$('#backLinkBtn').onclick = () => {
+  if (linkHistory.length > 0) {
+    const pos = linkHistory.pop();
+    if (linkHistory.length === 0) $('#backLinkBtn').style.display = 'none';
+    pendingAnchor = null; pageRestoreTarget = pos.page; renderChapter(pos.index);
+  }
+};
+// =====================================
+
 async function renderChapter(index){
   if(index<0||index>=spine.length) return;
-  const thisRender=++renderSequence;
-  currentIndex=index; chapterStart=Date.now(); activeMs=0;
-  const renderBookId=bookId;
-
-  saveJSON('epubProg_'+renderBookId, {index, pageIndex: 0});
-  pushBookState();
-
+  const thisRender=++renderSequence; currentIndex=index; chapterStart=Date.now(); activeMs=0;
+  saveJSON('epubProg_'+bookId, {index, pageIndex: 0}); pushBookState();
   const path=spine[index]; const file=await findFile(path);
-  if(!file){
-    pagesHost.innerHTML='<div class="page-container"><p>No se pudo cargar este capítulo.</p></div>';
-    totalPages=1; return;
-  }
-  let html=await file.async('string');
-  if(thisRender!==renderSequence || renderBookId!==bookId) return;
-
+  if(!file){ pagesHost.innerHTML='<div class="page-container"><p>Error al cargar capítulo.</p></div>'; totalPages=1; return; }
+  let html=await file.async('string'); if(thisRender!==renderSequence) return;
   const doc=new DOMParser().parseFromString(html,'application/xhtml+xml');
   const body=doc.querySelector('body')||doc.documentElement;
 
@@ -829,161 +628,77 @@ async function renderChapter(index){
     if(imgFile){ const blob=await imgFile.async('blob'); img.setAttribute(attr, URL.createObjectURL(blob)); }
   }
 
-  const container = document.createElement('div');
-  container.className = 'page-container';
-  container.innerHTML = body.innerHTML;
-  pagesHost.innerHTML = '';
-  pagesHost.appendChild(container);
+  const container = document.createElement('div'); container.className = 'page-container';
+  container.innerHTML = body.innerHTML; pagesHost.innerHTML = ''; pagesHost.appendChild(container);
   
   const contentWidth = pagesHost.clientWidth;
-  container.style.columnWidth = contentWidth + 'px';
-  container.style.WebkitColumnWidth = contentWidth + 'px';
-  
+  container.style.columnWidth = contentWidth + 'px'; container.style.WebkitColumnWidth = contentWidth + 'px';
   await preloadImages(container);
-  
   totalPages = Math.max(1, Math.round(container.scrollWidth / contentWidth));
 
-  applyHighlights();
-  renderHlist();
-
+  applyHighlights(); renderHlist();
   const active=tocItems.find(t=>t.href.split('#')[0]===path.split('#')[0]);
-  chapterTitleEl.textContent=active?active.label:'';
-  progressEl.textContent=(index+1)+' / '+spine.length;
+  chapterTitleEl.textContent=active?active.label:''; progressEl.textContent=(index+1)+' / '+spine.length;
 
-  let target=pageRestoreTarget||0;
-  if(pendingGoLastPage){ target=totalPages-1; pendingGoLastPage=false; }
-  pageRestoreTarget=0;
-  currentPage=Math.max(0, Math.min(target, totalPages-1));
+  if (pendingAnchor) {
+    const p = getAnchorPage(pendingAnchor);
+    currentPage = p !== -1 ? Math.min(p, totalPages - 1) : 0;
+    pendingAnchor = null;
+  } else {
+    let target=pageRestoreTarget||0; if(pendingGoLastPage){ target=totalPages-1; pendingGoLastPage=false; }
+    pageRestoreTarget=0; currentPage=Math.max(0, Math.min(target, totalPages-1));
+  }
   
-  showPage(currentPage);
-  updateTimeEstimate();
-  updatePageUI();
+  showPage(currentPage); updateTimeEstimate(); updatePageUI();
 }
 
 function preloadImages(root){
-  const imgs=[...root.querySelectorAll('img')];
-  if(!imgs.length) return Promise.resolve();
+  const imgs=[...root.querySelectorAll('img')]; if(!imgs.length) return Promise.resolve();
   return Promise.all(imgs.map(img=>{
     if(img.complete && img.naturalWidth>0) return Promise.resolve();
-    return new Promise(res=>{
-      img.addEventListener('load', res, {once:true});
-      img.addEventListener('error', res, {once:true});
-      setTimeout(res, 3000);
-    });
+    return new Promise(res=>{ img.addEventListener('load', res, {once:true}); img.addEventListener('error', res, {once:true}); setTimeout(res, 3000); });
   }));
 }
 
-// ---------- Subrayados ----------
-function nodeOffset(container, node, offsetInNode){
-  let charIndex=0; const w=document.createTreeWalker(container, NodeFilter.SHOW_TEXT); let n;
-  while(n=w.nextNode()){ if(n===node) return charIndex+offsetInNode; charIndex+=n.length; }
-  return -1;
-}
-function rangeFromOffsets(container, start, end){
-  let charIndex=0, startNode,startOffset,endNode,endOffset;
-  const w=document.createTreeWalker(container, NodeFilter.SHOW_TEXT); let n;
-  while(n=w.nextNode()){
-    const next=charIndex+n.length;
-    if(!startNode && start>=charIndex && start<=next){ startNode=n; startOffset=start-charIndex; }
-    if(!endNode && end>=charIndex && end<=next){ endNode=n; endOffset=end-charIndex; }
-    charIndex=next;
-  }
-  if(!startNode||!endNode) return null;
-  const r=document.createRange(); r.setStart(startNode,startOffset); r.setEnd(endNode,endOffset); return r;
-}
-function rangeFromText(container, searchText){
-  if(!searchText) return null; const needle=searchText.replace(/\s+/g,' ').trim(); if(needle.length<2) return null;
-  const walker=document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  const nodes=[]; const starts=[]; let acc=''; let n;
-  while(n=walker.nextNode()){ nodes.push(n); starts.push(acc.length); acc+=n.nodeValue; }
-  const haystack=acc.replace(/\s+/g,' '); const escaped=needle.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\s+/g,'\\s+');
-  const m=new RegExp(escaped).exec(haystack); if(!m) return null;
-  const matchStart=m.index, matchEnd=m.index+m[0].length;
-  let startNode=null, startOffset=0, endNode=null, endOffset=0;
-  for(let i=0;i<nodes.length;i++){
-    const s=starts[i]; const e=s+nodes[i].nodeValue.length;
-    if(!startNode && matchStart>=s && matchStart<=e){ startNode=nodes[i]; startOffset=matchStart-s; }
-    if(!endNode && matchEnd>=s && matchEnd<=e){ endNode=nodes[i]; endOffset=matchEnd-s; }
-  }
-  if(!startNode||!endNode) return null;
-  try{ const r=document.createRange(); r.setStart(startNode, startOffset); r.setEnd(endNode, endOffset); return r; }catch(e){ return null; }
-}
+function nodeOffset(container, node, offsetInNode){ let charIndex=0; const w=document.createTreeWalker(container, NodeFilter.SHOW_TEXT); let n; while(n=w.nextNode()){ if(n===node) return charIndex+offsetInNode; charIndex+=n.length; } return -1; }
+function rangeFromOffsets(container, start, end){ let charIndex=0, startNode,startOffset,endNode,endOffset; const w=document.createTreeWalker(container, NodeFilter.SHOW_TEXT); let n; while(n=w.nextNode()){ const next=charIndex+n.length; if(!startNode && start>=charIndex && start<=next){ startNode=n; startOffset=start-charIndex; } if(!endNode && end>=charIndex && end<=next){ endNode=n; endOffset=end-charIndex; } charIndex=next; } if(!startNode||!endNode) return null; const r=document.createRange(); r.setStart(startNode,startOffset); r.setEnd(endNode,endOffset); return r; }
+function rangeFromText(container, searchText){ if(!searchText) return null; const needle=searchText.replace(/\s+/g,' ').trim(); if(needle.length<2) return null; const walker=document.createTreeWalker(container, NodeFilter.SHOW_TEXT); const nodes=[]; const starts=[]; let acc=''; let n; while(n=walker.nextNode()){ nodes.push(n); starts.push(acc.length); acc+=n.nodeValue; } const haystack=acc.replace(/\s+/g,' '); const escaped=needle.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\s+/g,'\\s+'); const m=new RegExp(escaped).exec(haystack); if(!m) return null; const matchStart=m.index, matchEnd=m.index+m[0].length; let startNode=null, startOffset=0, endNode=null, endOffset=0; for(let i=0;i<nodes.length;i++){ const s=starts[i]; const e=s+nodes[i].nodeValue.length; if(!startNode && matchStart>=s && matchStart<=e){ startNode=nodes[i]; startOffset=matchStart-s; } if(!endNode && matchEnd>=s && matchEnd<=e){ endNode=nodes[i]; endOffset=matchEnd-s; } } if(!startNode||!endNode) return null; try{ const r=document.createRange(); r.setStart(startNode, startOffset); r.setEnd(endNode, endOffset); return r; }catch(e){ return null; } }
 
 function applyHighlights(){
-  const chHref=spine[currentIndex];
-  const hs=highlights.filter(h=>h.href===chHref).sort((a,b)=>a.start-b.start);
-  const container = pagesHost.querySelector('.page-container');
-  if(!container) return;
+  const chHref=spine[currentIndex]; const hs=highlights.filter(h=>h.href===chHref).sort((a,b)=>a.start-b.start);
+  const container = pagesHost.querySelector('.page-container'); if(!container) return;
   hs.forEach(h=>{
-    let r=rangeFromOffsets(container, h.start, h.end);
-    const rText=r?r.toString().replace(/\s+/g,' ').trim():'';
-    const expected=(h.text||'').replace(/\s+/g,' ').trim();
-    if(!r || (expected && rText && !rText.startsWith(expected.slice(0, Math.min(20, expected.length))))){
-      const r2=rangeFromText(container, expected); if(r2) r=r2;
-    }
-    if(!r) return;
-    if(r.startContainer.parentElement && r.startContainer.parentElement.closest('mark[data-id="'+h.id+'"]')) return;
-    try{
-      const frag=r.extractContents(); const walker=document.createTreeWalker(frag, NodeFilter.SHOW_TEXT);
-      const textNodes=[]; let n; while(n=walker.nextNode()) textNodes.push(n);
-      textNodes.forEach(tn=>{
-        if(!tn.nodeValue || !tn.nodeValue.trim()) return;
-        const m=document.createElement('mark'); m.className='h-'+h.color+(h.comment?' has-cmt':'');
-        m.dataset.id=h.id; m.onclick=()=>openHlPopup(h.id);
-        tn.parentNode.replaceChild(m, tn); m.appendChild(tn);
-      });
-      r.insertNode(frag);
+    let r=rangeFromOffsets(container, h.start, h.end); const rText=r?r.toString().replace(/\s+/g,' ').trim():''; const expected=(h.text||'').replace(/\s+/g,' ').trim();
+    if(!r || (expected && rText && !rText.startsWith(expected.slice(0, Math.min(20, expected.length))))){ const r2=rangeFromText(container, expected); if(r2) r=r2; }
+    if(!r) return; if(r.startContainer.parentElement && r.startContainer.parentElement.closest('mark[data-id="'+h.id+'"]')) return;
+    try{ const frag=r.extractContents(); const walker=document.createTreeWalker(frag, NodeFilter.SHOW_TEXT); const textNodes=[]; let n; while(n=walker.nextNode()) textNodes.push(n);
+      textNodes.forEach(tn=>{ if(!tn.nodeValue || !tn.nodeValue.trim()) return; const m=document.createElement('mark'); m.className='h-'+h.color+(h.comment?' has-cmt':''); m.dataset.id=h.id; m.onclick=()=>openHlPopup(h.id); tn.parentNode.replaceChild(m, tn); m.appendChild(tn); }); r.insertNode(frag);
     }catch(e){}
   });
 }
 
-pagesHost.addEventListener('mouseup', onSelectionMaybe);
-pagesHost.addEventListener('touchend', onSelectionMaybe);
+pagesHost.addEventListener('mouseup', onSelectionMaybe); pagesHost.addEventListener('touchend', onSelectionMaybe);
 function onSelectionMaybe(){
   setTimeout(()=>{
-    const sel=window.getSelection();
-    if(!sel || sel.isCollapsed || sel.rangeCount===0){ selToolbar.classList.remove('show'); return; }
-    const range=sel.getRangeAt(0);
-    if(!pagesHost.contains(range.commonAncestorContainer)){ return; }
-    const container = pagesHost.querySelector('.page-container');
-    if(!container) return;
-    pendingRange={
-      start: nodeOffset(container, range.startContainer, range.startOffset),
-      end: nodeOffset(container, range.endContainer, range.endOffset),
-      text: sel.toString().slice(0,300)
-    };
+    const sel=window.getSelection(); if(!sel || sel.isCollapsed || sel.rangeCount===0){ selToolbar.classList.remove('show'); return; }
+    const range=sel.getRangeAt(0); if(!pagesHost.contains(range.commonAncestorContainer)){ return; }
+    const container = pagesHost.querySelector('.page-container'); if(!container) return;
+    pendingRange={ start: nodeOffset(container, range.startContainer, range.startOffset), end: nodeOffset(container, range.endContainer, range.endOffset), text: sel.toString().slice(0,300) };
     if(pendingRange.start<0||pendingRange.end<0||pendingRange.start===pendingRange.end) return;
-    const rect=range.getBoundingClientRect();
-    selToolbar.style.left=Math.max(8, rect.left+rect.width/2-70)+'px';
-    selToolbar.style.top=Math.max(8, rect.top-44)+'px';
-    selToolbar.classList.add('show');
+    const rect=range.getBoundingClientRect(); selToolbar.style.left=Math.max(8, rect.left+rect.width/2-70)+'px'; selToolbar.style.top=Math.max(8, rect.top-44)+'px'; selToolbar.classList.add('show');
   },10);
 }
 document.addEventListener('mousedown', e=>{ if(!selToolbar.contains(e.target)) selToolbar.classList.remove('show'); });
-selToolbar.querySelectorAll('button[data-c]').forEach(btn=>{
-  btn.onclick=()=>{ createHighlight(btn.dataset.c, ''); selToolbar.classList.remove('show'); window.getSelection().removeAllRanges(); };
-});
-$('#cmtBtn').onclick=()=>{
-  const comment=prompt('Escribe tu nota:'); selToolbar.classList.remove('show');
-  if(comment===null) return;
-  createHighlight('yellow', comment); window.getSelection().removeAllRanges();
-};
-function createHighlight(color, comment){
-  if(!pendingRange) return;
-  highlights.push({ id:'h'+Date.now(), href:spine[currentIndex], start:pendingRange.start, end:pendingRange.end, text:pendingRange.text, color, comment });
-  saveJSON('epubHl_'+bookId, highlights); pushBookState(); renderChapter(currentIndex);
-}
+selToolbar.querySelectorAll('button[data-c]').forEach(btn=>{ btn.onclick=()=>{ createHighlight(btn.dataset.c, ''); selToolbar.classList.remove('show'); window.getSelection().removeAllRanges(); }; });
+$('#cmtBtn').onclick=()=>{ const comment=prompt('Escribe tu nota:'); selToolbar.classList.remove('show'); if(comment===null) return; createHighlight('yellow', comment); window.getSelection().removeAllRanges(); };
+function createHighlight(color, comment){ if(!pendingRange) return; highlights.push({ id:'h'+Date.now(), href:spine[currentIndex], start:pendingRange.start, end:pendingRange.end, text:pendingRange.text, color, comment }); saveJSON('epubHl_'+bookId, highlights); pushBookState(); renderChapter(currentIndex); }
 
 function openHlPopup(id){
   const h=highlights.find(x=>x.id===id); if(!h) return;
-  const action=prompt('Nota para este subrayado (déjalo vacío para quitar la nota):\n\nEscribe "borrar" para eliminar el subrayado.', h.comment||'');
-  if(action===null) return;
-  let nuevasNotas = JSON.parse(JSON.stringify(highlights));
-  const idx = nuevasNotas.findIndex(x=>x.id===id);
-  if(action.trim().toLowerCase()==='borrar'){ nuevasNotas.splice(idx,1); }
-  else { nuevasNotas[idx].comment=action; }
-  highlights = nuevasNotas;
-  saveJSON('epubHl_'+bookId, highlights); pushBookState(); renderChapter(currentIndex);
+  const action=prompt('Nota para este subrayado:\n\nEscribe "borrar" para eliminarlo.', h.comment||''); if(action===null) return;
+  let nuevasNotas = JSON.parse(JSON.stringify(highlights)); const idx = nuevasNotas.findIndex(x=>x.id===id);
+  if(action.trim().toLowerCase()==='borrar'){ nuevasNotas.splice(idx,1); } else { nuevasNotas[idx].comment=action; }
+  highlights = nuevasNotas; saveJSON('epubHl_'+bookId, highlights); pushBookState(); renderChapter(currentIndex);
 }
 
 const hlistItemsEl=$('#hlistItems');
@@ -992,11 +707,9 @@ function renderHlist(){
   if(!highlights.length){ hlistItemsEl.innerHTML='<div class="hl-empty">Aún no tienes subrayados.</div>'; return; }
   hlistItemsEl.innerHTML='';
   highlights.slice().reverse().forEach(h=>{
-    const idx=spine.indexOf(h.href);
-    const card=document.createElement('div'); card.className='hl-card';
+    const idx=spine.indexOf(h.href); const card=document.createElement('div'); card.className='hl-card';
     card.innerHTML='<span class="swatch" style="background:'+(colorDot[h.color]||'#F6D888')+'"></span><span class="snippet">'+escapeHtml(h.text)+'</span>'+(h.comment?'<div class="cmt">'+escapeHtml(h.comment)+'</div>':'');
-    card.onclick=()=>{ goTo(idx); $('#side').classList.remove('open'); };
-    hlistItemsEl.appendChild(card);
+    card.onclick=()=>{ goTo(idx); $('#side').classList.remove('open'); }; hlistItemsEl.appendChild(card);
   });
 }
 function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
@@ -1005,19 +718,15 @@ function goToLibrary(){
   finishChapterTiming(); pushBookState();
   spine=[]; zip=null; bookId=''; highlights=[]; wordCounts=[]; totalBookWords=0;
   pageRestoreTarget=0; currentPage=0; totalPages=1;
+  linkHistory=[]; $('#backLinkBtn').style.display='none'; // Reiniciamos el botón de volver
   pagesHost.style.display='none'; pagesHost.innerHTML='';
   navFoot.style.display='none'; $('#libBtn').style.display='none';
   $('#bookTitle').textContent='Sin libro cargado'; $('#bookAuthor').textContent=''; $('#chapterTitle').textContent='';
   bookProgress.style.width='0%'; emptyEl.style.display='flex'; loadLibrary();
 }
 $('#libBtn').onclick=goToLibrary;
-async function handleFile(f){
-  if(!f) return; bookSessionId++; renderSequence++;
-  try{ const buf=await f.arrayBuffer(); await loadEpub(buf); }
-  catch(err){ hideLoading(); $('#emptyBig').textContent='No se pudo leer'; $('#emptyMsg').textContent='¿Es un .epub válido?'; }
-}
-$('#file').addEventListener('change', e=>handleFile(e.target.files[0]));
-$('#fileLib').addEventListener('change', e=>handleFile(e.target.files[0]));
+async function handleFile(f){ if(!f) return; bookSessionId++; renderSequence++; try{ const buf=await f.arrayBuffer(); await loadEpub(buf); } catch(err){ hideLoading(); $('#emptyBig').textContent='No se pudo leer'; $('#emptyMsg').textContent='¿Es un .epub válido?'; } }
+$('#file').addEventListener('change', e=>handleFile(e.target.files[0])); $('#fileLib').addEventListener('change', e=>handleFile(e.target.files[0]));
 loadLibrary();
 </script>
 </body>
