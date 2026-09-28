@@ -383,7 +383,8 @@ function pushStats(){ if(!cloudReady) return; try{ fbDb.doc('users/'+cloudUid).s
 function pushBookState(){
   if(!cloudReady || !bookId) return;
   const syncBookId=bookId, syncUid=cloudUid;
-  const data={ currentIndex, highlights, pageIndex: currentPage, updatedAt: Date.now() };
+  const clonedHighlights = JSON.parse(JSON.stringify(highlights));
+  const data={ currentIndex, highlights: clonedHighlights, pageIndex: currentPage, updatedAt: Date.now() };
   try{
     fbDb.doc('users/'+syncUid+'/books/'+syncBookId)
       .set(data, {merge:true})
@@ -1159,7 +1160,7 @@ function openHlPopup(id){
   const action=prompt('Nota para este subrayado (déjalo vacío para quitar la nota):\n\nEscribe "borrar" para eliminar el subrayado.', h.comment||'');
   if(action===null) return;
   if(action.trim().toLowerCase()==='borrar'){ highlights=highlights.filter(x=>x.id!==id); }
-  else { h.comment=action; }
+  else { highlights = highlights.map(x => x.id === id ? { ...x, comment: action } : x); }
   saveJSON('epubHl_'+bookId, highlights);
   pushBookState();
   renderChapter(currentIndex);
