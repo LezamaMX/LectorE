@@ -67,7 +67,7 @@ input[type=file]{display:none}
 .bookbar{height:3px; background:var(--line); position:relative; flex-shrink:0;}
 .bookbar i{position:absolute; left:0; top:0; height:100%; background:var(--accent); width:0%; transition:width .3s}
 
-/* -------- Visor paginado FIX DEFINITIVO -------- */
+/* -------- Visor paginado -------- */
 .reader-wrap {
   flex: 1;
   position: relative;
@@ -77,15 +77,15 @@ input[type=file]{display:none}
 }
 .pages-host {
   position: absolute;
-  /* Posicionamiento estricto para crear los "márgenes" sin usar padding */
+  inset: 0;
+  max-width: 720px;
+  margin: 0 auto;
+  overflow: hidden; 
   top: 40px;
   bottom: 40px;
   left: max(20px, env(safe-area-inset-left));
   right: max(20px, env(safe-area-inset-right));
-  max-width: 720px;
-  margin: 0 auto;
-  overflow: hidden;
-  padding: 0; /* Cero padding asegura matemáticas perfectas */
+  padding: 0;
 }
 .page-container {
   height: 100%;
@@ -93,10 +93,8 @@ input[type=file]{display:none}
   line-height: 1.65;
   font-size: var(--fs, 19px);
   transition: transform 0.3s ease;
-  /* Se fuerzan los márgenes en cero absoluto */
   column-gap: 0px !important;
   -webkit-column-gap: 0px !important;
-  /* Evitamos que una palabra larga desborde la columna matemática */
   word-wrap: break-word;
   overflow-wrap: break-word;
 }
@@ -106,7 +104,8 @@ input[type=file]{display:none}
 .page-container svg, 
 .page-container image {
   max-width: 100% !important;
-  max-height: 100% !important;
+  /* Límite estricto de altura relativo a la pantalla para evitar cortes en PC */
+  max-height: 75vh !important; 
   width: auto !important;
   height: auto !important;
   object-fit: contain !important;
@@ -773,11 +772,9 @@ function finishChapterTiming(){
   recordSession(wordCounts[currentIndex]||0, ms/60000); activeMs=0;
 }
 
-// === FIX: CÁLCULO EXACTO DE LA PANTALLA PARA EL DESPLAZAMIENTO ===
 function showPage(i){
   const container = pagesHost.querySelector('.page-container');
   if(container) {
-     // El desplazamiento ahora es literalmente el 100% de la ventana que configuramos, ni un pixel más.
      const contentWidth = pagesHost.clientWidth;
      container.style.transform = `translateX(-${i * contentWidth}px)`;
   }
@@ -838,16 +835,12 @@ async function renderChapter(index){
   pagesHost.innerHTML = '';
   pagesHost.appendChild(container);
   
-  // === FIX: ASIGNAMOS EL TAMAÑO DE COLUMNA MILIMÉTRICAMENTE CON JAVASCRIPT ===
   const contentWidth = pagesHost.clientWidth;
-  
-  // Forzamos el ancho de la columna al tamaño real de la ventana interior
   container.style.columnWidth = contentWidth + 'px';
   container.style.WebkitColumnWidth = contentWidth + 'px';
   
   await preloadImages(container);
   
-  // Como ya no hay padding interno, el cálculo es una división perfecta.
   totalPages = Math.max(1, Math.round(container.scrollWidth / contentWidth));
 
   applyHighlights();
