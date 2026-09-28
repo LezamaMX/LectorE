@@ -753,7 +753,7 @@ function renderHlist(){
 }
 function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
-// === FUNCIONES DE EXPORTACIÓN Y GENERADOR APA 7 ===
+// === NUEVO GESTOR DE DESCARGAS (COMPATIBLE CON PWAS MÓVILES) ===
 function bookTitleSafe(){ return (($('#bookTitle').textContent||'libro').replace(/[^a-z0-9\- ]/gi,'').trim().slice(0,60))||'libro'; }
 function getChapterLabel(href,i){ const t=tocItems.find(t=>t.href.split('#')[0]===href.split('#')[0]); return t?t.label:'Capítulo '+(i+1); }
 function groupByChapter(){
@@ -773,11 +773,10 @@ function getAPACitation() {
   return `${formattedAuthor} (${y}). ${t}. ${p}`.trim() + '.';
 }
 
-// === FIX: API COMPARTIR EN MÓVILES PARA EXPORTACIONES ===
+// Interfaz interactiva de guardado
 async function saveFile(filename, blob) {
   const url = URL.createObjectURL(blob);
   
-  // Cambiamos la interfaz a una pantalla de éxito interactiva
   $('#loadingText').textContent = '¡Documento listo!';
   $('#loading .spinner').style.display = 'none';
   if($('#loadingBar')) $('#loadingBar').style.display = 'none';
@@ -788,7 +787,7 @@ async function saveFile(filename, blob) {
      actions.id = 'loadingActions';
      actions.style.marginTop = '20px';
      actions.innerHTML = `
-       <a id="downloadLinkBtn" href="#" download class="upload" style="text-decoration:none; display:inline-block; padding: 12px 24px; font-size: 15px; margin-bottom:15px; font-weight:600; background:#2F4B3C; color:#FAF7F0; border-radius:8px;">⬇ Guardar o Compartir</a>
+       <button id="downloadLinkBtn" class="upload" style="border:none; cursor:pointer; padding: 12px 24px; font-size: 15px; margin-bottom:15px; font-weight:600; background:#2F4B3C; color:#FAF7F0; border-radius:8px;">⬇ Guardar o Compartir</button>
        <br>
        <button id="closeLoadingBtn" style="background:transparent; border:1px solid rgba(255,255,255,0.6); color:#fff; padding:8px 24px; border-radius:8px; cursor:pointer; font-size:14px; font-family:var(--sans);">Cerrar</button>
      `;
@@ -797,24 +796,37 @@ async function saveFile(filename, blob) {
   actions.style.display = 'block';
   
   const dlBtn = $('#downloadLinkBtn');
-  dlBtn.href = url;
-  dlBtn.download = filename;
+  const newDlBtn = dlBtn.cloneNode(true);
+  dlBtn.parentNode.replaceChild(newDlBtn, dlBtn);
   
-  // Al tocar este botón físico, Android/iOS ya permiten la acción sin bloquearla por seguridad
-  dlBtn.onclick = (e) => {
+  newDlBtn.onclick = async () => {
+    const fileType = filename.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    
+    // Intento 1: API Compartir Nativa (iOS/Android PWA)
     if (navigator.canShare) {
-      const fileType = filename.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-      const file = new File([blob], filename, { type: fileType });
-      if (navigator.canShare({ files: [file] })) {
-         e.preventDefault(); 
-         navigator.share({ files: [file], title: filename })
-         .catch(err => {
-             console.warn("Share cancelado", err);
-             // Fallback silencioso por si falla algo interno
-             const a = document.createElement('a'); a.href = url; a.download = filename;
-             document.body.appendChild(a); a.click(); document.body.removeChild(a);
-         });
+      try {
+        const file = new File([blob], filename, { type: fileType });
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: filename });
+          return; 
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') return; 
       }
+    }
+
+    // Intento 2: Descarga de PC 
+    try {
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (err) {
+      // Intento 3: iOS extemo
+      window.open(url, '_blank');
     }
   };
 
@@ -822,7 +834,6 @@ async function saveFile(filename, blob) {
      hideLoading();
      $('#loading .spinner').style.display = 'block'; 
      actions.style.display = 'none';
-     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 }
 
@@ -921,6 +932,10 @@ async function exportDocx(){
       }
   }, 100);
 }
+
+// Cierra el menú al hacer click para que la pantalla de carga no quede tapada
+$('#expPdf').onclick = () => { $('#side').classList.remove('open'); exportPdf(); };
+$('#expDocx').onclick = () => { $('#side').classList.remove('open'); exportDocx(); };
 
 function goToLibrary(){
   finishChapterTiming(); pushBookState();
