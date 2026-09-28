@@ -67,7 +67,7 @@ input[type=file]{display:none}
 .bookbar{height:3px; background:var(--line); position:relative; flex-shrink:0;}
 .bookbar i{position:absolute; left:0; top:0; height:100%; background:var(--accent); width:0%; transition:width .3s}
 
-/* -------- Visor paginado (CSS Multi-column) -------- */
+/* -------- Visor paginado (CSS Multi-column CORREGIDO) -------- */
 .reader-wrap {
   flex: 1;
   position: relative;
@@ -80,32 +80,31 @@ input[type=file]{display:none}
   inset: 0;
   max-width: 720px;
   margin: 0 auto;
-  overflow: hidden; /* Enmascara el desbordamiento de las columnas adyacentes */
+  overflow: hidden; 
+  /* El margen interno se movió aquí para hacer una ventana estricta */
+  padding: 40px 20px; 
+  box-sizing: border-box;
 }
 .page-container {
-  column-width: 100vw;
-  column-gap: 0;
   height: 100%;
-  padding: 40px 20px;
-  box-sizing: border-box;
   font-family: var(--serif);
   line-height: 1.65;
   font-size: var(--fs, 19px);
   transition: transform 0.3s ease;
+  /* column-width y column-gap ahora se asignan desde Javascript con extrema precisión */
 }
 
-/* Imágenes acopladas al viewport para que no se corten */
 .page-container img, 
 .page-container svg, 
 .page-container image {
   max-width: 100% !important;
-  max-height: 75vh !important;
+  max-height: 100% !important; /* Ahora las portadas abarcarán exacto el espacio interior disponible */
   width: auto !important;
   height: auto !important;
   object-fit: contain !important;
   display: block;
   margin: 10px auto;
-  break-inside: avoid; /* Evita que la columna parta la imagen */
+  break-inside: avoid;
 }
 .page-container p { margin: 0 0 1em; }
 
@@ -571,12 +570,10 @@ async function openCloudBook(meta) {
 }
 
 // === COMPORTAMIENTO TÁCTIL MENÚ ===
-// Abrir/cerrar el menú evitando que el toque se propague
 $('#menuBtn').onclick = (e) => {
   e.stopPropagation();
   $('#side').classList.toggle('open');
 };
-// Cerrar el menú si se toca cualquier parte del contenedor principal
 $('.main').addEventListener('pointerdown', () => {
   if ($('#side').classList.contains('open')) {
     $('#side').classList.remove('open');
@@ -770,13 +767,16 @@ function finishChapterTiming(){
   recordSession(wordCounts[currentIndex]||0, ms/60000); activeMs=0;
 }
 
-// Lógica adaptada para columnas CSS
+// === FIX: PAGINACIÓN EXACTA POR CSS COLUMNS ===
 function showPage(i){
   const container = pagesHost.querySelector('.page-container');
   if(container) {
-     container.style.transform = `translateX(calc(-${i} * 100vw))`;
+     // El desplazamiento debe ser EXACTAMENTE el área visible menos el padding (40px)
+     const contentWidth = Math.max(1, pagesHost.clientWidth - 40);
+     container.style.transform = `translateX(-${i * contentWidth}px)`;
   }
 }
+
 function updatePageUI(){
   pageIndicatorEl.textContent = 'Pág. '+(currentPage+1)+' / '+totalPages;
   chapterProgressEl.textContent = 'Cap. '+(currentIndex+1)+' / '+spine.length;
@@ -827,18 +827,23 @@ async function renderChapter(index){
     if(imgFile){ const blob=await imgFile.async('blob'); img.setAttribute(attr, URL.createObjectURL(blob)); }
   }
 
-  // === Paginación usando las columnas CSS ===
+  // === FIX: ALINEACIÓN MILIMÉTRICA DE LAS COLUMNAS ===
   const container = document.createElement('div');
   container.className = 'page-container';
   container.innerHTML = body.innerHTML;
   pagesHost.innerHTML = '';
   pagesHost.appendChild(container);
   
-  // Pre-carga imágenes para calcular totalPages
+  // Calculamos el ancho exacto del contenido (la pantalla menos los 40px del margen)
+  const contentWidth = Math.max(1, pagesHost.clientWidth - 40);
+  container.style.columnWidth = contentWidth + 'px';
+  container.style.columnGap = '0px';
+  
+  // Pre-carga imágenes para calcular el total de páginas real
   await preloadImages(container);
   
-  // Calculamos cuantas columnas (pantallas) abarca
-  totalPages = Math.max(1, Math.ceil(container.scrollWidth / pagesHost.clientWidth));
+  // Como las columnas miden exacto el área visible, el total es una división perfecta.
+  totalPages = Math.max(1, Math.ceil(container.scrollWidth / contentWidth));
 
   applyHighlights();
   renderHlist();
@@ -971,20 +976,15 @@ function createHighlight(color, comment){
   saveJSON('epubHl_'+bookId, highlights); pushBookState(); renderChapter(currentIndex);
 }
 
-// === FIX DE MUTABILIDAD EN NOTAS PARA FIREBASE ===
 function openHlPopup(id){
   const h=highlights.find(x=>x.id===id); if(!h) return;
   const action=prompt('Nota para este subrayado (déjalo vacío para quitar la nota):\n\nEscribe "borrar" para eliminar el subrayado.', h.comment||'');
   if(action===null) return;
-  
-  // Clona el arreglo entero para que Firebase detecte el cambio con certeza
   let nuevasNotas = JSON.parse(JSON.stringify(highlights));
   const idx = nuevasNotas.findIndex(x=>x.id===id);
-  
   if(action.trim().toLowerCase()==='borrar'){ nuevasNotas.splice(idx,1); }
   else { nuevasNotas[idx].comment=action; }
-  
-  highlights = nuevasNotas; // Reemplaza la variable global
+  highlights = nuevasNotas;
   saveJSON('epubHl_'+bookId, highlights); pushBookState(); renderChapter(currentIndex);
 }
 
