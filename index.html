@@ -35,7 +35,28 @@
 html,body{height:100%;margin:0;overflow:hidden}
 body{background:var(--paper); color:var(--ink); font-family:var(--sans); padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);}
 .app{display:flex; height:100vh; height:100dvh}
-.side{width:260px; flex-shrink:0; background:var(--panel); border-right:1px solid var(--line); display:flex; flex-direction:column; overflow:hidden;}
+
+/* === MENÚ FLOTANTE PARA TODAS LAS PANTALLAS === */
+.side {
+  position: fixed; 
+  top: 0;
+  left: 0;
+  z-index: 10; 
+  height: 100%; 
+  width: 260px; 
+  transform: translateX(-100%); 
+  transition: transform .2s ease-in-out;
+  background: var(--panel); 
+  border-right: 1px solid var(--line); 
+  display: flex; 
+  flex-direction: column; 
+  overflow: hidden;
+  box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+}
+.side.open {
+  transform: translateX(0);
+}
+
 .side-head{padding:18px 16px 10px; border-bottom:1px solid var(--line)}
 .side-head h1{font-size:15px; margin:0 0 2px; font-weight:600}
 .side-head p{margin:0; font-size:12px; color:var(--ink-soft)}
@@ -166,9 +187,9 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
 #loading .progbar{width:220px; height:6px; background:rgba(255,255,255,.2); border-radius:3px; overflow:hidden;}
 #loading .progbar i{display:block; height:100%; width:0; background:#fff; transition:width .2s;}
 @keyframes spin{to{transform:rotate(360deg)}}
+
+/* Ya no necesitamos la media query para el panel (.side) porque ahora es universal */
 @media (max-width:720px){
-  .side{position:fixed; z-index:5; height:100%; transform:translateX(-100%); transition:transform .2s}
-  .side.open{transform:translateX(0)}
   .lib-card .cover{width:48px; height:66px;}
 }
 </style>
@@ -753,7 +774,7 @@ function renderHlist(){
 }
 function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
-// === NUEVO GESTOR DE DESCARGAS (COMPATIBLE CON PWAS MÓVILES) ===
+// === FIX: CERRAR MENÚ AL EXPORTAR PARA NO TAPAR LA PANTALLA ===
 function bookTitleSafe(){ return (($('#bookTitle').textContent||'libro').replace(/[^a-z0-9\- ]/gi,'').trim().slice(0,60))||'libro'; }
 function getChapterLabel(href,i){ const t=tocItems.find(t=>t.href.split('#')[0]===href.split('#')[0]); return t?t.label:'Capítulo '+(i+1); }
 function groupByChapter(){
@@ -773,7 +794,6 @@ function getAPACitation() {
   return `${formattedAuthor} (${y}). ${t}. ${p}`.trim() + '.';
 }
 
-// Interfaz interactiva de guardado
 async function saveFile(filename, blob) {
   const url = URL.createObjectURL(blob);
   
@@ -802,7 +822,6 @@ async function saveFile(filename, blob) {
   newDlBtn.onclick = async () => {
     const fileType = filename.endsWith('.pdf') ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     
-    // Intento 1: API Compartir Nativa (iOS/Android PWA)
     if (navigator.canShare) {
       try {
         const file = new File([blob], filename, { type: fileType });
@@ -815,7 +834,6 @@ async function saveFile(filename, blob) {
       }
     }
 
-    // Intento 2: Descarga de PC 
     try {
       const a = document.createElement('a');
       a.style.display = 'none';
@@ -825,7 +843,6 @@ async function saveFile(filename, blob) {
       a.click();
       document.body.removeChild(a);
     } catch (err) {
-      // Intento 3: iOS extemo
       window.open(url, '_blank');
     }
   };
