@@ -177,10 +177,25 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
 .nav-foot .row{display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--ink-soft); gap:10px;}
 .nav-foot button{background:none; border:1px solid var(--line); color:var(--ink); padding:7px 14px; border-radius:7px; cursor:pointer; font-family:var(--sans); font-size:13px;}
 .nav-foot button:disabled{opacity:.35; cursor:default}
-#selToolbar{position:fixed; display:none; background:var(--ink); border-radius:20px; padding:6px 8px; gap:6px; z-index:20; box-shadow:0 4px 14px rgba(0,0,0,.25)}
+
+/* === BARRA DE HERRAMIENTAS DE SELECCIÓN === */
+#selToolbar {
+  position: fixed; 
+  display: none; 
+  background: var(--ink); 
+  border-radius: 20px; 
+  padding: 10px 14px; 
+  gap: 12px; 
+  z-index: 20; 
+  box-shadow: 0 4px 14px rgba(0,0,0,.25);
+  bottom: max(30px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+}
 #selToolbar.show{display:flex}
 #selToolbar button{width:22px; height:22px; border-radius:50%; border:2px solid var(--paper); cursor:pointer; padding:0}
 #selToolbar .cmtbtn{width:auto; height:22px; border-radius:11px; border:none; background:var(--paper); color:var(--ink); font-size:11px; padding:0 8px; font-family:var(--sans)}
+
 #loading{position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:center; justify-content:center; color:#fff; font-family:var(--sans); font-size:14px; z-index:50; flex-direction:column; gap:12px; text-align:center; padding:20px;}
 #loading.show{display:flex}
 #loading .spinner{width:34px; height:34px; border:3px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%; animation:spin .8s linear infinite;}
@@ -188,7 +203,6 @@ mark.has-cmt{box-shadow:0 2px 0 var(--ink) inset}
 #loading .progbar i{display:block; height:100%; width:0; background:#fff; transition:width .2s;}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-/* Ya no necesitamos la media query para el panel (.side) porque ahora es universal */
 @media (max-width:720px){
   .lib-card .cover{width:48px; height:66px;}
 }
@@ -740,7 +754,9 @@ function onSelectionMaybe(){
     const container = pagesHost.querySelector('.page-container'); if(!container) return;
     pendingRange={ start: nodeOffset(container, range.startContainer, range.startOffset), end: nodeOffset(container, range.endContainer, range.endOffset), text: sel.toString().slice(0,300) };
     if(pendingRange.start<0||pendingRange.end<0||pendingRange.start===pendingRange.end) return;
-    const rect=range.getBoundingClientRect(); selToolbar.style.left=Math.max(8, rect.left+rect.width/2-70)+'px'; selToolbar.style.top=Math.max(8, rect.top-44)+'px'; selToolbar.classList.add('show');
+    
+    // Solo mostramos la barra, ya no calculamos el rect.left ni rect.top
+    selToolbar.classList.add('show');
   }, 250);
 }
 
@@ -751,14 +767,28 @@ document.addEventListener('pointerdown', e=>{ if(!selToolbar.contains(e.target))
 
 selToolbar.querySelectorAll('button[data-c]').forEach(btn=>{ btn.onclick=()=>{ createHighlight(btn.dataset.c, ''); selToolbar.classList.remove('show'); window.getSelection().removeAllRanges(); }; });
 $('#cmtBtn').onclick=()=>{ const comment=prompt('Escribe tu nota:'); selToolbar.classList.remove('show'); if(comment===null) return; createHighlight('yellow', comment); window.getSelection().removeAllRanges(); };
-function createHighlight(color, comment){ if(!pendingRange) return; highlights.push({ id:'h'+Date.now(), href:spine[currentIndex], start:pendingRange.start, end:pendingRange.end, text:pendingRange.text, color, comment }); saveJSON('epubHl_'+bookId, highlights); pushBookState(); renderChapter(currentIndex); }
+
+function createHighlight(color, comment){ 
+  if(!pendingRange) return; 
+  highlights.push({ id:'h'+Date.now(), href:spine[currentIndex], start:pendingRange.start, end:pendingRange.end, text:pendingRange.text, color, comment }); 
+  saveJSON('epubHl_'+bookId, highlights); 
+  pushBookState(); 
+  
+  // FIX: Guardamos la página en la que estamos antes de repintar el capítulo
+  pageRestoreTarget = currentPage; 
+  renderChapter(currentIndex); 
+}
 
 function openHlPopup(id){
   const h=highlights.find(x=>x.id===id); if(!h) return;
   const action=prompt('Nota para este subrayado:\n\nEscribe "borrar" para eliminarlo.', h.comment||''); if(action===null) return;
   let nuevasNotas = JSON.parse(JSON.stringify(highlights)); const idx = nuevasNotas.findIndex(x=>x.id===id);
   if(action.trim().toLowerCase()==='borrar'){ nuevasNotas.splice(idx,1); } else { nuevasNotas[idx].comment=action; }
-  highlights = nuevasNotas; saveJSON('epubHl_'+bookId, highlights); pushBookState(); renderChapter(currentIndex);
+  highlights = nuevasNotas; saveJSON('epubHl_'+bookId, highlights); pushBookState(); 
+  
+  // FIX: Igual aquí, guardamos la página
+  pageRestoreTarget = currentPage;
+  renderChapter(currentIndex);
 }
 
 const hlistItemsEl=$('#hlistItems');
